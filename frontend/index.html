@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Винни — Jira Time Logger</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="avatar" id="avatar">🐻</div>
+            <h1>Винни</h1>
+            <p class="subtitle" id="status">Инициализация...</p>
+        </div>
+
+        <div class="state-card">
+            <div class="pulse" id="pulse"></div>
+            <span id="stateText">Подождите...</span>
+        </div>
+
+        <button class="stop-btn" id="stopBtn" onclick="stopRecording()">
+            ⏹ Баста
+        </button>
+
+        <div class="hints-panel">
+            <h3>Контрольные слова</h3>
+            <div class="hints-grid">
+                <div class="hint-row">
+                    <span class="hint-keyword">Номер задачи</span>
+                    <span class="hint-example">PROJ-123</span>
+                </div>
+                <div class="hint-row">
+                    <span class="hint-keyword">Время на задачу</span>
+                    <span class="hint-example">два часа / 1.5 часа</span>
+                </div>
+                <div class="hint-row">
+                    <span class="hint-keyword">Дата выполнения задачи</span>
+                    <span class="hint-example">сегодня / вчера / 25 апреля</span>
+                </div>
+                <div class="hint-row">
+                    <span class="hint-keyword">Действия по задаче</span>
+                    <span class="hint-example">описание что делал</span>
+                </div>
+                <div class="hint-row hint-stop">
+                    <span class="hint-keyword">Баста</span>
+                    <span class="hint-example">завершить запись</span>
+                </div>
+            </div>
+            <p class="hint-note">Порядок фраз — любой. Максимальная длина записи — 2 минуты.</p>
+        </div>
+
+        <div class="result-panel" id="resultPanel" style="display:none">
+            <h3>Последняя запись</h3>
+            <div id="resultContent"></div>
+        </div>
+
+        <div class="entries-panel">
+            <h3>История</h3>
+            <div id="entriesList"><p class="empty">Загрузка...</p></div>
+        </div>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>

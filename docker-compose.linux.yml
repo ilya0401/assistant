@@ -1,0 +1,21 @@
+services:
+  vinnie:
+    build:
+      context: ./backend
+      pull: false
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./frontend:/frontend:ro
+      - whisper_cache:/root/.cache/huggingface
+    env_file: .env
+    environment:
+      - OS_TYPE=linux
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+volumes:
+  whisper_cache:
