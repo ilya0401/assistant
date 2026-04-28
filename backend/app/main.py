@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form, UploadFile, File
@@ -50,6 +51,9 @@ async def process(
 
     text = transcribe(audio_bytes)
     log.info("Transcribed: %s", text)
+
+    # Убираем стоп-фразу из транскрипции перед парсингом
+    text = re.sub(r"\s*конец записи\.?\s*$", "", text, flags=re.IGNORECASE).strip()
 
     if not text:
         return JSONResponse({"status": "error", "voice_message": "Не расслышал. Попробуй ещё раз."})

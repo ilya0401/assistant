@@ -1,7 +1,7 @@
 "use strict";
 
 const WAKE_PHRASES = ["привет ассистент", "привет, ассистент", "привет асистент"];
-const STOP_PHRASES  = ["баста", "basta", "стоп запись"];
+const STOP_PHRASES  = ["конец записи", "конец записи."];
 const RECORD_TIMEOUT_MS = 120_000;
 
 let recognition     = null;
@@ -30,7 +30,7 @@ function speakText(text) {
         speechSynthesis.cancel();
         const utter  = new SpeechSynthesisUtterance(text);
         utter.lang   = "ru-RU";
-        utter.rate   = 1.15;   // чуть быстрее — роботы говорят без пауз
+        utter.rate   = 1;   // чуть быстрее — роботы говорят без пауз
         utter.pitch  = 0.55;   // низкий тон — главный маркер робота
         utter.volume = 1;
         const voice  = pickRobotVoice();
@@ -190,8 +190,8 @@ async function startRecording() {
 
     mediaRecorder.start(200);
     const prompt = clarificationContext
-        ? "Слушаю ответ... Скажи «Баста» когда закончишь"
-        : "Запись... Скажи «Баста» когда закончишь";
+        ? "Слушаю ответ... Скажи «Конец записи» когда закончишь"
+        : "Запись... Скажи «Конец записи» когда закончишь";
     setState("recording", prompt);
     document.getElementById("stopBtn").style.display = "block";
 
@@ -218,6 +218,7 @@ async function processAudio() {
     const blob = new Blob(audioChunks, { type: audioChunks[0]?.type ?? "audio/webm" });
     const form = new FormData();
     form.append("file", blob, "recording.webm");
+    const wasClarification = !!clarificationContext;
     if (clarificationContext) form.append("context", JSON.stringify(clarificationContext));
 
     let data;
@@ -230,8 +231,12 @@ async function processAudio() {
         return;
     }
 
-    setState("speaking", `Винни: «${data.voice_message}»`);
-    await speakText(data.voice_message);
+    const textToSpeak = (wasClarification && data.status === "success")
+        ? "Уточнения успешно записаны"
+        : data.voice_message;
+
+    setState("speaking", `Винни: «${textToSpeak}»`);
+    await speakText(textToSpeak);
 
     if (data.status === "success") {
         showResult(data.id, data.transcribed, data.parsed);

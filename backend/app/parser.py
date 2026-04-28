@@ -28,8 +28,84 @@ _MONTHS_RU = {
     "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12,
 }
 
+_HOURS_WORDS = {
+    "один": 1, "одна": 1, "два": 2, "две": 2, "три": 3, "четыре": 4,
+    "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
+}
 
-def _normalize_date(raw: str) -> str:
+_MINUTES_WORDS = {
+    **_HOURS_WORDS,
+    "пятнадцать": 15, "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50,
+    "десять": 10, "пятнадцать": 15,
+}
+
+
+def _normalize_task(raw: str) -> str:
+    """Приводит номер задачи к маске XX-12345 (латинские буквы + дефис + цифры)."""
+    s = raw.strip()
+    # Уже в правильном формате
+    if re.match(r"^[A-Za-z]{1,5}-\d+$", s):
+        return s.upper()
+    # Ищем латинские буквы (возможно транслит или просто буквы) и цифры
+    letters = re.sub(r"[^A-Za-zА-Яа-яЁё]", "", s)
+    digits = re.sub(r"\D", "", s)
+    # Транслитерация первых букв если кириллица
+    _translit = {
+        "а": "A", "б": "B", "в": "V", "г": "G", "д": "D", "е": "E",
+        "ж": "ZH", "з": "Z", "и": "I", "й": "Y", "к": "K", "л": "L",
+        "м": "M", "н": "N", "о": "O", "п": "P", "р": "R", "с": "S",
+        "т": "T", "у": "U", "ф": "F", "х": "KH", "ц": "TS", "ч": "CH",
+        "ш": "SH", "щ": "SCH", "э": "E", "ю": "YU", "я": "YA",
+        "г": "G", "ё": "YO",
+    }
+    lat = ""
+    for ch in letters[:4].lower():
+        if "a" <= ch <= "z":
+            lat += ch.upper()
+        else:
+            lat += _translit.get(ch, ch.upper())
+    if lat and digits:
+        return f"{lat}-{digits}"
+    if digits:
+        return digits
+    return s
+
+
+def _normalize_time(raw: str) -> str:
+    """Приводит время к формату Jira: 1h 25m."""
+    s = raw.strip().lower()
+
+    # Уже в формате 1h 25m
+    if re.match(r"^\d+h(\s+\d+m)?$", s) or re.match(r"^\d+m$", s):
+        return s
+
+    hours = 0
+    minutes = 0
+
+    # Числа словами или цифрами перед "час" и "минут"
+    h_match = re.search(r"(\d+|[а-яё]+)\s*час", s)
+    m_match = re.search(r"(\d+|[а-яё]+)\s*мин", s)
+
+    if h_match:
+        val = h_match.group(1)
+        hours = int(val) if val.isdigit() else _HOURS_WORDS.get(val, 0)
+    if m_match:
+        val = m_match.group(1)
+        minutes = int(val) if val.isdigit() else _MINUTES_WORDS.get(val, 0)
+
+    if hours or minutes:
+        parts = []
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes:
+            parts.append(f"{minutes}m")
+        return " ".join(parts)
+
+    return raw
+
+
+def _normalize_date(raw: str) -> str | None:
+    """Возвращает дату ISO или None если не удалось распознать."""
     s = raw.strip().lower()
     today = date.today()
     for word, delta in _DATE_WORDS.items():
@@ -54,7 +130,7 @@ def _normalize_date(raw: str) -> str:
             return date(yr, mo, d).isoformat()
         except ValueError:
             pass
-    return raw
+    return None
 
 
 def _find_triggers(text: str) -> list[tuple[int, int, str]]:
@@ -116,8 +192,15 @@ def parse_worklog(text: str, context: dict | None = None) -> dict:
         if value:
             result[field] = value
 
+    if result.get("task"):
+        result["task"] = _normalize_task(result["task"])
+
+    if result.get("time_spent"):
+        result["time_spent"] = _normalize_time(result["time_spent"])
+
     if result.get("date"):
-        result["date"] = _normalize_date(result["date"])
+        normalized = _normalize_date(result["date"])
+        result["date"] = normalized if normalized else None
 
     required = ["task", "time_spent", "date"]
     missing = [f for f in required if not result.get(f)]
