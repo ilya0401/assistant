@@ -8,9 +8,18 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 
+def _get_token() -> str:
+    if settings.jira_token_file:
+        try:
+            return open(settings.jira_token_file).read().strip()
+        except OSError as e:
+            log.error("Cannot read JIRA_TOKEN_FILE %s: %s", settings.jira_token_file, e)
+    return settings.jira_api_token
+
+
 def _headers() -> dict:
     return {
-        "Authorization": f"Bearer {settings.jira_api_token}",
+        "Authorization": f"Bearer {_get_token()}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
@@ -22,7 +31,7 @@ def _base_url() -> str:
 
 def find_issue(task_key: str) -> str | None:
     """Returns issue summary if found, None if not found or Jira not configured."""
-    if not settings.jira_url or not settings.jira_api_token:
+    if not settings.jira_url or not _get_token():
         return None
     url = f"{_base_url()}/rest/api/2/issue/{task_key}"
     try:
@@ -38,7 +47,7 @@ def find_issue(task_key: str) -> str | None:
 
 def log_work(task_key: str, time_spent: str, date: str, description: str) -> bool:
     """Logs work to Jira issue worklog. Returns True on success."""
-    if not settings.jira_url or not settings.jira_api_token:
+    if not settings.jira_url or not _get_token():
         return False
     url = f"{_base_url()}/rest/api/2/issue/{task_key}/worklog"
     try:

@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     claude_api_key: str = ""
     jira_api_token: str = ""
+    jira_token_file: str = ""
     jira_url: str = ""
     jira_email: str = ""
     whisper_model: str = "base"
