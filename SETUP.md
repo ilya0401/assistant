@@ -131,7 +131,62 @@ docker-compose down
 
 ---
 
-# Раздел 2 — Запуск на удалённом сервере Linux
+# Раздел 2 — Подключение с Windows (браузерный клиент)
+
+Приложение работает на удалённом Linux-сервере. На Windows ничего устанавливать не нужно —
+только браузер Chrome. Микрофон и голос работают прямо в браузере.
+
+```
+Windows (Chrome + микрофон)  →  HTTP  →  Linux-сервер (Docker + Винни)
+```
+
+---
+
+### Что понадобится
+
+| Программа | Установить если нет |
+|-----------|---------------------|
+| Google Chrome | [google.com/chrome](https://www.google.com/chrome/) |
+
+---
+
+### Шаг 1 — Узнай IP сервера
+
+На Linux-сервере выполни:
+
+```bash
+hostname -I | awk '{print $1}'
+```
+
+Запомни адрес, например `192.168.1.50`.
+
+---
+
+### Шаг 2 — Открой приложение в Chrome
+
+```
+http://192.168.1.50:8000
+```
+
+---
+
+### Шаг 3 — Разреши микрофон (обязательно)
+
+⚠️ Chrome блокирует микрофон на HTTP-адресах, которые не являются `localhost`.
+Нужно добавить адрес сервера в исключения:
+
+1. В Chrome открой: `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+2. В поле вставь адрес сервера: `http://192.168.1.50:8000`
+3. Нажми **Enable** → кнопка **Relaunch** (Chrome перезапустится)
+4. Снова открой `http://192.168.1.50:8000` — Chrome спросит разрешение на микрофон, нажми **Разрешить**
+
+> Это одноразовая настройка — после перезапуска Chrome помнит исключение.
+
+---
+
+---
+
+# Раздел 3 — Развёртывание на Linux-сервере
 
 ### Архитектура
 
@@ -313,9 +368,9 @@ scp user@your-server-ip:/home/user/vinnie-assistant/data/worklog.xlsx ~/Desktop/
 | `OS_TYPE` | `macos` | `linux` | ⚠️ Отличается — влияет на docker-compose |
 | `WHISPER_MODEL` | `base` | `base` или `small` | `base` быстрее, `small` точнее для акцентов |
 | `DATA_DIR` | `/data` | `/data` | Путь внутри контейнера — не менять |
-| `JIRA_API_TOKEN` | *(пусто)* | *(пусто)* | Зарезервировано для следующей итерации |
-| `JIRA_URL` | *(пусто)* | *(пусто)* | URL твоего Jira (`https://company.atlassian.net`) |
-| `JIRA_EMAIL` | *(пусто)* | *(пусто)* | Email аккаунта Jira |
+| `JIRA_API_TOKEN` | Personal Access Token из Jira | Personal Access Token из Jira | Токен авторизации Jira |
+| `JIRA_URL` | `https://jira.gemsdev.ru/` | `https://jira.gemsdev.ru/` | URL Jira-инстанса |
+| `JIRA_EMAIL` | `твой@email.com` | `твой@email.com` | Email аккаунта Jira |
 
 ### Размеры моделей Whisper
 
