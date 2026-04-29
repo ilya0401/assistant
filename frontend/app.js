@@ -58,10 +58,19 @@ function setState(state, message) {
     el.className   = "avatar " + state;
 }
 
-function showResult(id, transcribed, parsed) {
+function showResult(id, transcribed, parsed, jiraStatus) {
+    const jiraLabels = {
+        ok:        '<span class="jira-badge jira-ok">✓ Залогировано в Jira</span>',
+        not_found: '<span class="jira-badge jira-warn">⚠ Задача не найдена в Jira</span>',
+        error:     '<span class="jira-badge jira-warn">⚠ Ошибка логирования в Jira</span>',
+        skipped:   '',
+    };
+    const jiraHtml = jiraLabels[jiraStatus] ?? "";
+
     document.getElementById("resultPanel").style.display = "block";
     document.getElementById("resultContent").innerHTML = `
         <span class="success-badge">✓ Записано #${id}</span>
+        ${jiraHtml}
         <div class="transcribed-text">«${transcribed}»</div>
         <div class="result-grid">
             <div class="result-item">
@@ -239,7 +248,7 @@ async function processAudio() {
     await speakText(textToSpeak);
 
     if (data.status === "success") {
-        showResult(data.id, data.transcribed, data.parsed);
+        showResult(data.id, data.transcribed, data.parsed, data.jira_status);
         loadEntries();
         returnToIdle();
 

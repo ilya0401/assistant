@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .jira_client import find_issue, log_work
 from .parser import parse_worklog
 from .stt import get_model, transcribe
 from .worklog import get_entries, save_entry
@@ -79,17 +80,38 @@ async def process(
             "context": merged_ctx,
         })
 
-    entry_id = save_entry(
-        task=parsed.get("task") or "—",
-        date=parsed.get("date") or "",
-        time_spent=parsed.get("time_spent") or "—",
-        description=parsed.get("description") or "",
-    )
+    task = parsed.get("task") or "—"
+    date = parsed.get("date") or ""
+    time_spent = parsed.get("time_spent") or "—"
+    description = parsed.get("description") or ""
+
+    entry_id = save_entry(task=task, date=date, time_spent=time_spent, description=description)
     log.info("Saved entry #%d", entry_id)
+
+    # Jira: best-effort, не блокирует сохранение в Excel
+    jira_status = "skipped"
+    if task != "—":
+        issue_summary = find_issue(task)
+        if issue_summary is None:
+            jira_status = "not_found"
+            voice_message = f"Записал, но задача {task} не найдена в Jira."
+        else:
+            ok = log_work(task, time_spent, date, description)
+            if ok:
+                jira_status = "ok"
+                voice_message = "Записал и залогировал в Jira."
+            else:
+                jira_status = "error"
+                voice_message = "Записал в файл, но не удалось залогировать в Jira."
+    else:
+        voice_message = "Запись успешно сохранена в файл."
+
+    log.info("Jira status: %s", jira_status)
 
     return JSONResponse({
         "status": "success",
-        "voice_message": parsed.get("voice_response", "Записал!"),
+        "voice_message": voice_message,
+        "jira_status": jira_status,
         "id": entry_id,
         "transcribed": text,
         "parsed": parsed,
