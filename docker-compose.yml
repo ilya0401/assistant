@@ -2,13 +2,13 @@ services:
   vinnie:
     build:
       context: ./backend
-      pull: false
+    pull_policy: never
     ports:
       - "8000:8000"
     volumes:
       - ./data:/data
       - ./frontend:/frontend:ro
-      - whisper_cache:/root/.cache/huggingface
+      - whisper_cache:/home/appuser/.cache/huggingface
     env_file: .env
     environment:
       - OS_TYPE=macos

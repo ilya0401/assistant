@@ -14,6 +14,15 @@
             <p class="subtitle" id="status">Инициализация...</p>
         </div>
 
+        <div class="prefix-selector">
+            <label for="taskPrefix">Префикс задачи</label>
+            <select id="taskPrefix">
+                <option value="KAN">KAN</option>
+                <option value="GM">GM</option>
+                <option value="TEST">TEST</option>
+            </select>
+        </div>
+
         <div class="state-card">
             <div class="pulse" id="pulse"></div>
             <span id="stateText">Подождите...</span>
@@ -28,7 +37,7 @@
             <div class="hints-grid">
                 <div class="hint-row">
                     <span class="hint-keyword">Номер задачи</span>
-                    <span class="hint-example">PROJ-123</span>
+                    <span class="hint-example">только цифры, например «сорок пять»</span>
                 </div>
                 <div class="hint-row">
                     <span class="hint-keyword">Время на задачу</span>
@@ -60,6 +69,30 @@
             <div id="entriesList"><p class="empty">Загрузка...</p></div>
         </div>
     </div>
+
+    <!-- Модальное окно подтверждения номера задачи -->
+    <div id="taskModal" class="modal-overlay" style="display:none">
+        <div class="modal-box">
+            <p class="modal-title">Правильно ли я расслышал номер задачи?</p>
+            <p class="modal-task-key" id="modalTaskKey"></p>
+            <div class="modal-buttons">
+                <button class="btn-yes" onclick="onTaskConfirmed()">Да</button>
+                <button class="btn-retry" onclick="onTaskRetry()">Запишем номер задачи ещё раз</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Поле ручного ввода (после 2 неудачных попыток) -->
+    <div id="manualTaskPanel" class="modal-overlay" style="display:none">
+        <div class="modal-box">
+            <p class="modal-title">Введи номер задачи вручную</p>
+            <div class="manual-task-row">
+                <input type="text" id="manualTaskInput" placeholder="KAN-4" autocomplete="off">
+                <button class="btn-yes" onclick="onManualTaskSubmit()">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

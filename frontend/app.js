@@ -4,19 +4,30 @@ const WAKE_PHRASES = ["привет ассистент", "привет, асси
 const STOP_PHRASES  = ["конец записи", "конец записи."];
 const RECORD_TIMEOUT_MS = 120_000;
 
-let recognition     = null;
-let stopRecognition = null;
-let mediaRecorder   = null;
-let audioChunks     = [];
-let currentState    = "init";
-let recordTimer     = null;
+let recognition          = null;
+let stopRecognition      = null;
+let mediaRecorder        = null;
+let audioChunks          = [];
+let currentState         = "init";
+let recordTimer          = null;
 let clarificationContext = null;
+let pendingEntry         = null;   // данные ожидающие подтверждения номера задачи
+let taskRetryCount       = 0;      // счётчик попыток перезаписи номера
+let isTaskOnlyMode       = false;  // режим записи только номера задачи
+
+function buildFullTask(raw) {
+    const prefix = document.getElementById("taskPrefix").value;
+    if (!raw) return prefix ? `${prefix}-?` : "?";
+    // Если уже содержит дефис — считаем полным ключом
+    if (raw.includes("-")) return raw.toUpperCase();
+    // Иначе: digits only — склеиваем с prefix
+    return prefix ? `${prefix}-${raw}` : raw;
+}
 
 // ── TTS (браузерный, без сервера) ─────────────────────────────────────────────
 
 function pickRobotVoice() {
     const voices = speechSynthesis.getVoices();
-    // Предпочитаем русский мужской голос — звучит роботообразнее
     const ruMale = voices.find(v =>
         v.lang.startsWith("ru") && /male|мужской|dmitri|yuri|pavel/i.test(v.name)
     );
@@ -30,8 +41,8 @@ function speakText(text) {
         speechSynthesis.cancel();
         const utter  = new SpeechSynthesisUtterance(text);
         utter.lang   = "ru-RU";
-        utter.rate   = 1;   // чуть быстрее — роботы говорят без пауз
-        utter.pitch  = 0.55;   // низкий тон — главный маркер робота
+        utter.rate   = 1;
+        utter.pitch  = 0.55;
         utter.volume = 1;
         const voice  = pickRobotVoice();
         if (voice) utter.voice = voice;
@@ -41,14 +52,13 @@ function speakText(text) {
     });
 }
 
-// Голоса грузятся асинхронно — прогреваем список при старте
 speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 
 // ── UI ────────────────────────────────────────────────────────────────────────
 
 function setState(state, message) {
     currentState = state;
-    document.getElementById("pulse").className    = "pulse " + state;
+    document.getElementById("pulse").className       = "pulse " + state;
     document.getElementById("stateText").textContent = message;
     document.getElementById("status").textContent    = message;
 
@@ -56,6 +66,12 @@ function setState(state, message) {
     const el = document.getElementById("avatar");
     el.textContent = icons[state] ?? "🐻";
     el.className   = "avatar " + state;
+}
+
+function esc(str) {
+    const d = document.createElement("div");
+    d.textContent = str ?? "—";
+    return d.innerHTML;
 }
 
 function showResult(id, transcribed, parsed, jiraStatus) {
@@ -69,25 +85,25 @@ function showResult(id, transcribed, parsed, jiraStatus) {
 
     document.getElementById("resultPanel").style.display = "block";
     document.getElementById("resultContent").innerHTML = `
-        <span class="success-badge">✓ Записано #${id}</span>
+        <span class="success-badge">✓ Записано #${esc(String(id))}</span>
         ${jiraHtml}
-        <div class="transcribed-text">«${transcribed}»</div>
+        <div class="transcribed-text">«${esc(transcribed)}»</div>
         <div class="result-grid">
             <div class="result-item">
                 <div class="label">Номер задачи</div>
-                <div class="value">${parsed.task ?? "—"}</div>
+                <div class="value">${esc(parsed.task)}</div>
             </div>
             <div class="result-item">
                 <div class="label">Дата</div>
-                <div class="value">${parsed.date ?? "—"}</div>
+                <div class="value">${esc(parsed.date)}</div>
             </div>
             <div class="result-item">
                 <div class="label">Время на задачу</div>
-                <div class="value">${parsed.time_spent ?? "—"}</div>
+                <div class="value">${esc(parsed.time_spent)}</div>
             </div>
             <div class="result-item full">
                 <div class="label">Действия по задаче</div>
-                <div class="value">${parsed.description ?? "—"}</div>
+                <div class="value">${esc(parsed.description)}</div>
             </div>
         </div>`;
 }
@@ -97,6 +113,70 @@ function showMessage(text, type = "info") {
     const cls = type === "error" ? "error-msg" : "info-msg";
     document.getElementById("resultContent").innerHTML =
         `<div class="${cls}">${type === "error" ? "⚠️" : "💬"} ${text}</div>`;
+}
+
+// ── Modal — подтверждение номера задачи ───────────────────────────────────────
+
+function showTaskModal(taskKey) {
+    document.getElementById("modalTaskKey").textContent = taskKey;
+    document.getElementById("taskModal").style.display = "flex";
+}
+
+function hideTaskModal() {
+    document.getElementById("taskModal").style.display = "none";
+}
+
+async function onTaskConfirmed() {
+    hideTaskModal();
+    await confirmEntry(pendingEntry);
+}
+
+async function onTaskRetry() {
+    hideTaskModal();
+    taskRetryCount++;
+    if (taskRetryCount >= 2) {
+        document.getElementById("manualTaskInput").value = pendingEntry.task || "";
+        document.getElementById("manualTaskPanel").style.display = "flex";
+        setState("idle", "Введи номер задачи вручную");
+    } else {
+        isTaskOnlyMode = true;
+        setState("listening", "Продиктуй номер задачи...");
+        await speakText("Продиктуй номер задачи");
+        startRecording();
+    }
+}
+
+async function onManualTaskSubmit() {
+    const manualTask = document.getElementById("manualTaskInput").value.trim();
+    if (!manualTask) return;
+    document.getElementById("manualTaskPanel").style.display = "none";
+    pendingEntry.task = manualTask;
+    await confirmEntry(pendingEntry);
+}
+
+async function confirmEntry(entry) {
+    setState("processing", "Сохраняю...");
+    let data;
+    try {
+        const resp = await fetch("/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(entry),
+        });
+        data = await resp.json();
+    } catch (err) {
+        await speakText("Ошибка соединения с сервером.");
+        returnToIdle();
+        return;
+    }
+
+    setState("speaking", `Винни: «${data.voice_message}»`);
+    await speakText(data.voice_message);
+    showResult(data.id, data.transcribed, data.parsed, data.jira_status);
+    loadEntries();
+    taskRetryCount = 0;
+    pendingEntry   = null;
+    returnToIdle();
 }
 
 // ── Beep ──────────────────────────────────────────────────────────────────────
@@ -125,7 +205,7 @@ function startWakeWordDetection() {
     }
     recognition = new SR();
     recognition.lang = "ru-RU";
-    recognition.continuous    = true;
+    recognition.continuous     = true;
     recognition.interimResults = true;
 
     recognition.onresult = (event) => {
@@ -193,14 +273,17 @@ async function startRecording() {
     mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         document.getElementById("stopBtn").style.display = "none";
-        await speakText("Запись успешно создана");
+        await speakText(isTaskOnlyMode ? "Принял" : "Запись успешно создана");
         processAudio();
     };
 
     mediaRecorder.start(200);
-    const prompt = clarificationContext
-        ? "Слушаю ответ... Скажи «Конец записи» когда закончишь"
-        : "Запись... Скажи «Конец записи» когда закончишь";
+
+    const prompt = isTaskOnlyMode
+        ? "Продиктуй номер задачи... Скажи «Конец записи» когда закончишь"
+        : clarificationContext
+            ? "Слушаю ответ... Скажи «Конец записи» когда закончишь"
+            : "Запись... Скажи «Конец записи» когда закончишь";
     setState("recording", prompt);
     document.getElementById("stopBtn").style.display = "block";
 
@@ -227,8 +310,15 @@ async function processAudio() {
     const blob = new Blob(audioChunks, { type: audioChunks[0]?.type ?? "audio/webm" });
     const form = new FormData();
     form.append("file", blob, "recording.webm");
-    const wasClarification = !!clarificationContext;
-    if (clarificationContext) form.append("context", JSON.stringify(clarificationContext));
+    form.append("task_prefix", document.getElementById("taskPrefix").value);
+
+    if (isTaskOnlyMode) {
+        form.append("task_only", "true");
+    } else if (clarificationContext) {
+        form.append("context", JSON.stringify(clarificationContext));
+    }
+
+    const wasClarification = !!clarificationContext && !isTaskOnlyMode;
 
     let data;
     try {
@@ -237,6 +327,26 @@ async function processAudio() {
     } catch (err) {
         await speakText("Ошибка соединения с сервером.");
         returnToIdle();
+        return;
+    }
+
+    // Результат перезаписи номера задачи
+    if (data.status === "task_only_result") {
+        isTaskOnlyMode = false;
+        const fullTask1 = buildFullTask(data.task);
+        pendingEntry.task = fullTask1;
+        setState("idle", `Подтверди номер задачи: ${fullTask1}`);
+        showTaskModal(fullTask1);
+        return;
+    }
+
+    // Все поля заполнены — показываем модалку подтверждения (без голоса)
+    if (data.status === "task_confirmation") {
+        isTaskOnlyMode = false;
+        const fullTask2 = buildFullTask(data.parsed.task);
+        pendingEntry = { ...data.parsed, task: fullTask2, transcribed: data.transcribed };
+        setState("idle", `Подтверди номер задачи: ${fullTask2}`);
+        showTaskModal(fullTask2);
         return;
     }
 
@@ -266,6 +376,7 @@ async function processAudio() {
 
 function returnToIdle() {
     clarificationContext = null;
+    isTaskOnlyMode       = false;
     setState("idle", "Слушаю... Скажи «Привет Ассистент»");
     startWakeWordDetection();
 }
@@ -283,9 +394,9 @@ async function loadEntries() {
         }
         list.innerHTML = entries.map(e => `
             <div class="entry-card">
-                <span class="entry-task">${e.task}</span>
-                <span class="entry-meta">${e.date} · ${e.time_spent}</span>
-                <span class="entry-desc">${e.description}</span>
+                <span class="entry-task">${esc(e.task)}</span>
+                <span class="entry-meta">${esc(e.date)} · ${esc(e.time_spent)}</span>
+                <span class="entry-desc">${esc(e.description)}</span>
             </div>`).join("");
     } catch (_) {}
 }

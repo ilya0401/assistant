@@ -40,35 +40,23 @@ _MINUTES_WORDS = {
 }
 
 
-def _normalize_task(raw: str) -> str:
-    """Приводит номер задачи к маске XX-12345 (латинские буквы + дефис + цифры)."""
+def _normalize_task(raw: str, prefix: str = "") -> str:
+    """Build task key from voice-extracted value and optional UI prefix."""
+    digits = re.sub(r"\D", "", raw.strip())
+    if prefix and digits:
+        return f"{prefix}-{digits}"
     s = raw.strip()
-    # Уже в правильном формате
     if re.match(r"^[A-Za-z]{1,5}-\d+$", s):
         return s.upper()
-    # Ищем латинские буквы (возможно транслит или просто буквы) и цифры
-    letters = re.sub(r"[^A-Za-zА-Яа-яЁё]", "", s)
-    digits = re.sub(r"\D", "", s)
-    # Транслитерация первых букв если кириллица
-    _translit = {
-        "а": "A", "б": "B", "в": "V", "г": "G", "д": "D", "е": "E",
-        "ж": "ZH", "з": "Z", "и": "I", "й": "Y", "к": "K", "л": "L",
-        "м": "M", "н": "N", "о": "O", "п": "P", "р": "R", "с": "S",
-        "т": "T", "у": "U", "ф": "F", "х": "KH", "ц": "TS", "ч": "CH",
-        "ш": "SH", "щ": "SCH", "э": "E", "ю": "YU", "я": "YA",
-        "г": "G", "ё": "YO",
-    }
-    lat = ""
-    for ch in letters[:4].lower():
-        if "a" <= ch <= "z":
-            lat += ch.upper()
-        else:
-            lat += _translit.get(ch, ch.upper())
-    if lat and digits:
-        return f"{lat}-{digits}"
     if digits:
         return digits
     return s
+
+
+def parse_task_only(text: str, prefix: str) -> str:
+    """Extract digits from text and combine with prefix. Used for task re-record."""
+    digits = re.sub(r"\D", "", text)
+    return f"{prefix}-{digits}" if (prefix and digits) else digits
 
 
 def _normalize_time(raw: str) -> str:
@@ -182,7 +170,7 @@ def _build_voice_response(_parsed: dict) -> str:
     return "Запись успешно сохранена в файл."
 
 
-def parse_worklog(text: str, context: dict | None = None) -> dict:
+def parse_worklog(text: str, context: dict | None = None, task_prefix: str = "") -> dict:
     result: dict = dict(context or {})
     triggers = _find_triggers(text)
 
@@ -193,7 +181,7 @@ def parse_worklog(text: str, context: dict | None = None) -> dict:
             result[field] = value
 
     if result.get("task"):
-        result["task"] = _normalize_task(result["task"])
+        result["task"] = _normalize_task(result["task"], prefix=task_prefix)
 
     if result.get("time_spent"):
         result["time_spent"] = _normalize_time(result["time_spent"])

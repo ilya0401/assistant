@@ -245,3 +245,124 @@ h1 {
 
 .jira-ok   { background: #1e3a2f; color: #a6e3a1; border: 1px solid #a6e3a1; }
 .jira-warn { background: #3a2a1e; color: #f9e2af; border: 1px solid #f9e2af; }
+
+/* ── Prefix selector ── */
+.prefix-selector {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+}
+
+.prefix-selector label {
+    font-size: 0.9rem;
+    color: #a0aec0;
+    white-space: nowrap;
+}
+
+.prefix-selector select {
+    background: #1e2a3a;
+    color: #cdd6f4;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    padding: 0.4rem 0.75rem;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    outline: none;
+}
+
+.prefix-selector select:focus {
+    border-color: #89b4fa;
+}
+
+/* ── Modal overlay ── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 1rem;
+}
+
+.modal-box {
+    background: #1e2a3a;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+}
+
+.modal-title {
+    font-size: 1.05rem;
+    color: #cdd6f4;
+    margin-bottom: 0.75rem;
+}
+
+.modal-task-key {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #89b4fa;
+    margin-bottom: 1.5rem;
+    letter-spacing: 0.05em;
+}
+
+.modal-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.btn-yes {
+    background: #1e3a2f;
+    color: #a6e3a1;
+    border: 1px solid #a6e3a1;
+    border-radius: 10px;
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-yes:hover { background: #2a4a3f; }
+
+.btn-retry {
+    background: rgba(255,255,255,0.05);
+    color: #f9e2af;
+    border: 1px solid #f9e2af;
+    border-radius: 10px;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-retry:hover { background: rgba(249,226,175,0.1); }
+
+/* ── Manual task input ── */
+.manual-task-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.manual-task-row input {
+    flex: 1;
+    background: #0f1f30;
+    color: #cdd6f4;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem;
+    font-size: 1rem;
+    outline: none;
+}
+.manual-task-row input:focus { border-color: #89b4fa; }

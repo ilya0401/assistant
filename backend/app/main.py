@@ -3,13 +3,13 @@ import logging
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Form, UploadFile, File
+from fastapi import FastAPI, Form, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .jira_client import find_issue, log_work
-from .parser import parse_worklog
+from .parser import parse_task_only, parse_worklog
 from .stt import get_model, transcribe
 from .worklog import get_entries, save_entry
 
@@ -46,23 +46,34 @@ async def index():
 async def process(
     file: UploadFile = File(...),
     context: str = Form(default=""),
+    task_prefix: str = Form(default=""),
+    task_only: str = Form(default=""),
 ):
-    audio_bytes = await file.read()
+    audio_bytes = await file.read(10 * 1024 * 1024)  # max 10 MB
+    if len(audio_bytes) >= 10 * 1024 * 1024:
+        return JSONResponse({"status": "error", "voice_message": "Файл слишком большой. Максимум 10 МБ."})
     log.info("Received audio: %d bytes", len(audio_bytes))
 
     text = transcribe(audio_bytes)
     log.info("Transcribed: %s", text)
 
-    # Убираем стоп-фразу из транскрипции перед парсингом
     text = re.sub(r"\s*конец записи\.?\s*$", "", text, flags=re.IGNORECASE).strip()
 
     if not text:
         return JSONResponse({"status": "error", "voice_message": "Не расслышал. Попробуй ещё раз."})
 
+    # Режим перезаписи только номера задачи
+    if task_only:
+        task = parse_task_only(text, task_prefix)
+        if not task:
+            return JSONResponse({"status": "error", "voice_message": "Не расслышал цифры. Попробуй ещё раз."})
+        log.info("Task-only result: %s", task)
+        return JSONResponse({"status": "task_only_result", "task": task})
+
     ctx = json.loads(context) if context else None
 
     try:
-        parsed = parse_worklog(text, context=ctx)
+        parsed = parse_worklog(text, context=ctx, task_prefix=task_prefix)
     except Exception as e:
         log.error("Parse error: %s", e)
         return JSONResponse({"status": "error", "voice_message": "Не удалось разобрать команду. Попробуй ещё раз."})
@@ -80,15 +91,28 @@ async def process(
             "context": merged_ctx,
         })
 
+    # Все поля заполнены — возвращаем на подтверждение номера задачи (не сохраняем)
     task = parsed.get("task") or "—"
-    date = parsed.get("date") or ""
-    time_spent = parsed.get("time_spent") or "—"
-    description = parsed.get("description") or ""
+    return JSONResponse({
+        "status": "task_confirmation",
+        "voice_message": f"Правильно ли я записал номер задачи {task}?",
+        "parsed": parsed,
+        "transcribed": text,
+    })
+
+
+@app.post("/confirm")
+async def confirm(request: Request):
+    data = await request.json()
+    task = data.get("task") or "—"
+    date = data.get("date") or ""
+    time_spent = data.get("time_spent") or "—"
+    description = data.get("description") or ""
+    transcribed = data.get("transcribed") or ""
 
     entry_id = save_entry(task=task, date=date, time_spent=time_spent, description=description)
-    log.info("Saved entry #%d", entry_id)
+    log.info("Confirmed and saved entry #%d", entry_id)
 
-    # Jira: best-effort, не блокирует сохранение в Excel
     jira_status = "skipped"
     if task != "—":
         issue_summary = find_issue(task)
@@ -113,8 +137,8 @@ async def process(
         "voice_message": voice_message,
         "jira_status": jira_status,
         "id": entry_id,
-        "transcribed": text,
-        "parsed": parsed,
+        "transcribed": transcribed,
+        "parsed": data,
     })
 
 

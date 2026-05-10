@@ -17,9 +17,12 @@ def _get_token() -> str:
     return settings.jira_api_token
 
 
+def _auth() -> tuple[str, str]:
+    return (settings.jira_email, _get_token())
+
+
 def _headers() -> dict:
     return {
-        "Authorization": f"Bearer {_get_token()}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
@@ -31,11 +34,11 @@ def _base_url() -> str:
 
 def find_issue(task_key: str) -> str | None:
     """Returns issue summary if found, None if not found or Jira not configured."""
-    if not settings.jira_url or not _get_token():
+    if not settings.jira_url or not settings.jira_email or not _get_token():
         return None
-    url = f"{_base_url()}/rest/api/2/issue/{task_key}"
+    url = f"{_base_url()}/rest/api/3/issue/{task_key}"
     try:
-        resp = requests.get(url, headers=_headers(), timeout=5, verify=False)
+        resp = requests.get(url, headers=_headers(), auth=_auth(), timeout=5)
         if resp.status_code == 200:
             return resp.json().get("fields", {}).get("summary", "")
         log.warning("Jira find_issue %s: HTTP %d", task_key, resp.status_code)
@@ -47,9 +50,9 @@ def find_issue(task_key: str) -> str | None:
 
 def log_work(task_key: str, time_spent: str, date: str, description: str) -> bool:
     """Logs work to Jira issue worklog. Returns True on success."""
-    if not settings.jira_url or not _get_token():
+    if not settings.jira_url or not settings.jira_email or not _get_token():
         return False
-    url = f"{_base_url()}/rest/api/2/issue/{task_key}/worklog"
+    url = f"{_base_url()}/rest/api/3/issue/{task_key}/worklog"
     try:
         dt = datetime.strptime(date, "%Y-%m-%d")
         started = dt.strftime("%Y-%m-%dT09:00:00.000+0000")
@@ -59,10 +62,14 @@ def log_work(task_key: str, time_spent: str, date: str, description: str) -> boo
     payload = {
         "timeSpent": time_spent,
         "started": started,
-        "comment": description or "",
+        "comment": {
+            "type": "doc",
+            "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": description or ""}]}],
+        },
     }
     try:
-        resp = requests.post(url, headers=_headers(), json=payload, timeout=5, verify=False)
+        resp = requests.post(url, headers=_headers(), auth=_auth(), json=payload, timeout=5)
         if resp.status_code in (200, 201):
             return True
         log.warning("Jira log_work %s: HTTP %d — %s", task_key, resp.status_code, resp.text[:200])
