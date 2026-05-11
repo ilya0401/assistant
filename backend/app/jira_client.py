@@ -38,7 +38,7 @@ def find_issue(task_key: str) -> str | None:
         return None
     url = f"{_base_url()}/rest/api/3/issue/{task_key}"
     try:
-        resp = requests.get(url, headers=_headers(), auth=_auth(), timeout=5)
+        resp = requests.get(url, headers=_headers(), auth=_auth(), timeout=15)
         if resp.status_code == 200:
             return resp.json().get("fields", {}).get("summary", "")
         log.warning("Jira find_issue %s: HTTP %d", task_key, resp.status_code)
@@ -69,7 +69,7 @@ def log_work(task_key: str, time_spent: str, date: str, description: str) -> boo
         },
     }
     try:
-        resp = requests.post(url, headers=_headers(), auth=_auth(), json=payload, timeout=5)
+        resp = requests.post(url, headers=_headers(), auth=_auth(), json=payload, timeout=15)
         if resp.status_code in (200, 201):
             return True
         log.warning("Jira log_work %s: HTTP %d — %s", task_key, resp.status_code, resp.text[:200])

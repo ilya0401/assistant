@@ -28,21 +28,54 @@ _MONTHS_RU = {
     "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12,
 }
 
-_HOURS_WORDS = {
-    "один": 1, "одна": 1, "два": 2, "две": 2, "три": 3, "четыре": 4,
-    "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
+_RU_ONES = {
+    "ноль": 0, "нуль": 0, "один": 1, "одна": 1, "два": 2, "две": 2,
+    "три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7,
+    "восемь": 8, "девять": 9,
 }
+_RU_TEENS = {
+    "десять": 10, "одиннадцать": 11, "двенадцать": 12, "тринадцать": 13,
+    "четырнадцать": 14, "пятнадцать": 15, "шестнадцать": 16, "семнадцать": 17,
+    "восемнадцать": 18, "девятнадцать": 19,
+}
+_RU_TENS = {
+    "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50,
+    "шестьдесят": 60, "семьдесят": 70, "восемьдесят": 80, "девяносто": 90,
+}
+_RU_HUNDREDS = {
+    "сто": 100, "двести": 200, "триста": 300, "четыреста": 400,
+    "пятьсот": 500, "шестьсот": 600, "семьсот": 700, "восемьсот": 800, "девятьсот": 900,
+}
+_ALL_RU_NUMS = {**_RU_ONES, **_RU_TEENS, **_RU_TENS, **_RU_HUNDREDS}
 
-_MINUTES_WORDS = {
-    **_HOURS_WORDS,
-    "пятнадцать": 15, "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50,
-    "десять": 10, "пятнадцать": 15,
-}
+_HOURS_WORDS = {**_RU_ONES, "десять": 10}
+_MINUTES_WORDS = {**_RU_ONES, **_RU_TEENS, "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50}
+
+
+def _ru_words_to_digits(text: str) -> str:
+    """Replaces Russian number words in text with their digit equivalents."""
+    words = text.lower().split()
+    result = []
+    i = 0
+    while i < len(words):
+        total = 0
+        j = i
+        while j < len(words) and words[j] in _ALL_RU_NUMS:
+            total += _ALL_RU_NUMS[words[j]]
+            j += 1
+        if j > i:
+            result.append(str(total))
+            i = j
+        else:
+            result.append(words[i])
+            i += 1
+    return " ".join(result)
 
 
 def _normalize_task(raw: str, prefix: str = "") -> str:
     """Build task key from voice-extracted value and optional UI prefix."""
-    digits = re.sub(r"\D", "", raw.strip())
+    converted = _ru_words_to_digits(raw)
+    digits = re.sub(r"\D", "", converted)
     if prefix and digits:
         return f"{prefix}-{digits}"
     s = raw.strip()
@@ -55,7 +88,8 @@ def _normalize_task(raw: str, prefix: str = "") -> str:
 
 def parse_task_only(text: str, prefix: str) -> str:
     """Extract digits from text and combine with prefix. Used for task re-record."""
-    digits = re.sub(r"\D", "", text)
+    converted = _ru_words_to_digits(text)
+    digits = re.sub(r"\D", "", converted)
     return f"{prefix}-{digits}" if (prefix and digits) else digits
 
 
@@ -190,7 +224,7 @@ def parse_worklog(text: str, context: dict | None = None, task_prefix: str = "")
         normalized = _normalize_date(result["date"])
         result["date"] = normalized if normalized else None
 
-    required = ["task", "time_spent", "date"]
+    required = ["task", "time_spent", "date", "description"]
     missing = [f for f in required if not result.get(f)]
 
     result["needs_clarification"] = bool(missing)
