@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
@@ -53,11 +53,16 @@ def log_work(task_key: str, time_spent: str, date: str, description: str) -> boo
     if not settings.jira_url or not settings.jira_email or not _get_token():
         return False
     url = f"{_base_url()}/rest/api/3/issue/{task_key}/worklog"
+    now_utc = datetime.now(tz=timezone.utc)
+    today = now_utc.date()
     try:
-        dt = datetime.strptime(date, "%Y-%m-%d")
-        started = dt.strftime("%Y-%m-%dT09:00:00.000+0000")
+        dt = datetime.strptime(date, "%Y-%m-%d").date()
+        if dt == today:
+            started = now_utc.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+        else:
+            started = f"{date}T09:00:00.000+0000"
     except (ValueError, TypeError):
-        started = datetime.now().strftime("%Y-%m-%dT09:00:00.000+0000")
+        started = now_utc.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
     payload = {
         "timeSpent": time_spent,
