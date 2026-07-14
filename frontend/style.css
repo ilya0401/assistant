@@ -302,67 +302,71 @@ h1 {
     text-align: center;
 }
 
+.modal-box-wide {
+    max-width: 560px;
+    text-align: left;
+}
+
 .modal-title {
     font-size: 1.05rem;
     color: #cdd6f4;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
+    text-align: center;
 }
 
-.modal-task-key {
-    font-size: 2rem;
-    font-weight: 800;
-    color: #89b4fa;
-    margin-bottom: 1.5rem;
-    letter-spacing: 0.05em;
+/* ── Full-form modal ── */
+.full-form {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 0.6rem 0.75rem;
+    align-items: center;
+    margin: 1.25rem 0 1.5rem;
 }
 
-.modal-buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
+.full-form label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #8892a4;
+    text-align: right;
+    padding-right: 0.25rem;
+    white-space: nowrap;
 }
 
-.btn-yes {
-    background: #1e3a2f;
-    color: #a6e3a1;
-    border: 1px solid #a6e3a1;
-    border-radius: 10px;
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-.btn-yes:hover { background: #2a4a3f; }
-
-.btn-retry {
-    background: rgba(255,255,255,0.05);
-    color: #f9e2af;
-    border: 1px solid #f9e2af;
-    border-radius: 10px;
-    padding: 0.75rem 1.5rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-.btn-retry:hover { background: rgba(249,226,175,0.1); }
-
-/* ── Manual task input ── */
-.manual-task-row {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 1rem;
+.full-form textarea {
+    align-self: start;
 }
 
-.manual-task-row input {
-    flex: 1;
+.full-form input,
+.full-form textarea {
     background: #0f1f30;
     color: #cdd6f4;
-    border: 1px solid rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.15);
     border-radius: 8px;
-    padding: 0.6rem 0.9rem;
-    font-size: 1rem;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.95rem;
+    font-family: inherit;
     outline: none;
+    resize: vertical;
+    width: 100%;
+    transition: border-color 0.15s;
 }
-.manual-task-row input:focus { border-color: #89b4fa; }
+
+.full-form input:focus,
+.full-form textarea:focus {
+    border-color: #89b4fa;
+}
+
+.btn-submit {
+    width: 100%;
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0.85rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+}
+.btn-submit:hover { background: #1d4ed8; transform: translateY(-1px); }

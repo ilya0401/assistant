@@ -32,20 +32,20 @@ def _base_url() -> str:
     return settings.jira_url.rstrip("/")
 
 
+def jira_configured() -> bool:
+    return bool(settings.jira_url and settings.jira_email and _get_token())
+
+
 def find_issue(task_key: str) -> str | None:
-    """Returns issue summary if found, None if not found or Jira not configured."""
-    if not settings.jira_url or not settings.jira_email or not _get_token():
-        return None
+    """Returns issue summary if found, None if not found (404), raises on error."""
     url = f"{_base_url()}/rest/api/3/issue/{task_key}"
-    try:
-        resp = requests.get(url, headers=_headers(), auth=_auth(), timeout=15)
-        if resp.status_code == 200:
-            return resp.json().get("fields", {}).get("summary", "")
-        log.warning("Jira find_issue %s: HTTP %d", task_key, resp.status_code)
+    resp = requests.get(url, headers=_headers(), auth=_auth(), timeout=15)
+    log.info("Jira find_issue %s: HTTP %d", task_key, resp.status_code)
+    if resp.status_code == 200:
+        return resp.json().get("fields", {}).get("summary", "")
+    if resp.status_code == 404:
         return None
-    except Exception as e:
-        log.error("Jira find_issue error: %s", e)
-        return None
+    resp.raise_for_status()
 
 
 def log_work(task_key: str, time_spent: str, date: str, description: str) -> bool:

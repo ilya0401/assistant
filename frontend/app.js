@@ -4,27 +4,24 @@ const WAKE_PHRASES = ["привет ассистент", "привет, асси
 const STOP_PHRASES  = ["конец записи", "конец записи."];
 const RECORD_TIMEOUT_MS = 120_000;
 
-let recognition          = null;
-let stopRecognition      = null;
-let mediaRecorder        = null;
-let audioChunks          = [];
-let currentState         = "init";
-let recordTimer          = null;
-let clarificationContext = null;
-let pendingEntry         = null;   // данные ожидающие подтверждения номера задачи
-let taskRetryCount       = 0;      // счётчик попыток перезаписи номера
-let isTaskOnlyMode       = false;  // режим записи только номера задачи
+let recognition           = null;
+let stopRecognition       = null;
+let mediaRecorder         = null;
+let audioChunks           = [];
+let currentState          = "init";
+let recordTimer           = null;
+let clarificationContext  = null;
+let clarificationAttempts = 0;
+let pendingEntry          = null;
 
 function buildFullTask(raw) {
     const prefix = document.getElementById("taskPrefix").value;
     if (!raw) return prefix ? `${prefix}-?` : "?";
-    // Если уже содержит дефис — считаем полным ключом
     if (raw.includes("-")) return raw.toUpperCase();
-    // Иначе: digits only — склеиваем с prefix
     return prefix ? `${prefix}-${raw}` : raw;
 }
 
-// ── TTS (браузерный, без сервера) ─────────────────────────────────────────────
+// ── TTS ───────────────────────────────────────────────────────────────────────
 
 function pickRobotVoice() {
     const voices = speechSynthesis.getVoices();
@@ -78,7 +75,7 @@ function showResult(id, transcribed, parsed, jiraStatus) {
     const jiraLabels = {
         ok:        '<span class="jira-badge jira-ok">✓ Залогировано в Jira</span>',
         not_found: '<span class="jira-badge jira-warn">⚠ Задача не найдена в Jira</span>',
-        error:     '<span class="jira-badge jira-warn">⚠ Ошибка логирования в Jira</span>',
+        error:     '<span class="jira-badge jira-warn">⚠ Ошибка подключения к Jira</span>',
         skipped:   '',
     };
     const jiraHtml = jiraLabels[jiraStatus] ?? "";
@@ -115,43 +112,41 @@ function showMessage(text, type = "info") {
         `<div class="${cls}">${type === "error" ? "⚠️" : "💬"} ${text}</div>`;
 }
 
-// ── Modal — подтверждение номера задачи ───────────────────────────────────────
+// ── Full-form modal ───────────────────────────────────────────────────────────
 
-function showTaskModal(taskKey) {
-    document.getElementById("modalTaskKey").textContent = taskKey;
-    document.getElementById("taskModal").style.display = "flex";
+function showFullFormModal(data) {
+    document.getElementById("formTask").value = data.task || "";
+    document.getElementById("formDate").value = data.date || "";
+    document.getElementById("formTime").value = data.time_spent || "";
+    document.getElementById("formDesc").value = data.description || "";
+    document.getElementById("fullFormModal").style.display = "flex";
+    setState("idle", "Проверь и дополни данные");
 }
 
-function hideTaskModal() {
-    document.getElementById("taskModal").style.display = "none";
+function hideFullFormModal() {
+    document.getElementById("fullFormModal").style.display = "none";
 }
 
-async function onTaskConfirmed() {
-    hideTaskModal();
-    await confirmEntry(pendingEntry);
-}
+async function onFullFormSubmit() {
+    const task        = document.getElementById("formTask").value.trim();
+    const date        = document.getElementById("formDate").value.trim();
+    const time_spent  = document.getElementById("formTime").value.trim();
+    const descField   = document.getElementById("formDesc");
+    const description = descField.value.trim();
 
-async function onTaskRetry() {
-    hideTaskModal();
-    taskRetryCount++;
-    if (taskRetryCount >= 2) {
-        document.getElementById("manualTaskInput").value = pendingEntry.task || "";
-        document.getElementById("manualTaskPanel").style.display = "flex";
-        setState("idle", "Введи номер задачи вручную");
-    } else {
-        isTaskOnlyMode = true;
-        setState("listening", "Продиктуй номер задачи...");
-        await speakText("Продиктуй номер задачи");
-        startRecording();
+    if (!description) {
+        descField.reportValidity();
+        return;
     }
-}
 
-async function onManualTaskSubmit() {
-    const manualTask = document.getElementById("manualTaskInput").value.trim();
-    if (!manualTask) return;
-    document.getElementById("manualTaskPanel").style.display = "none";
-    pendingEntry.task = manualTask;
-    await confirmEntry(pendingEntry);
+    hideFullFormModal();
+    await confirmEntry({
+        task,
+        date,
+        time_spent,
+        description,
+        transcribed: pendingEntry?.transcribed || "",
+    });
 }
 
 async function confirmEntry(entry) {
@@ -174,8 +169,7 @@ async function confirmEntry(entry) {
     await speakText(data.voice_message);
     showResult(data.id, data.transcribed, data.parsed, data.jira_status);
     loadEntries();
-    taskRetryCount = 0;
-    pendingEntry   = null;
+    pendingEntry = null;
     returnToIdle();
 }
 
@@ -228,7 +222,7 @@ async function onWakeWord() {
     startRecording();
 }
 
-// ── Stop-phrase detection (во время записи) ───────────────────────────────────
+// ── Stop-phrase detection ─────────────────────────────────────────────────────
 
 function startStopPhraseDetection() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -273,17 +267,15 @@ async function startRecording() {
     mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         document.getElementById("stopBtn").style.display = "none";
-        await speakText(isTaskOnlyMode ? "Принял" : "Запись успешно создана");
+        await speakText(clarificationContext ? "Принял" : "Запись успешно создана");
         processAudio();
     };
 
     mediaRecorder.start(200);
 
-    const prompt = isTaskOnlyMode
-        ? "Продиктуй номер задачи... Скажи «Конец записи» когда закончишь"
-        : clarificationContext
-            ? "Слушаю ответ... Скажи «Конец записи» когда закончишь"
-            : "Запись... Скажи «Конец записи» когда закончишь";
+    const prompt = clarificationContext
+        ? "Слушаю ответ... Скажи «Конец записи» когда закончишь"
+        : "Запись... Скажи «Конец записи» когда закончишь";
     setState("recording", prompt);
     document.getElementById("stopBtn").style.display = "block";
 
@@ -312,13 +304,9 @@ async function processAudio() {
     form.append("file", blob, "recording.webm");
     form.append("task_prefix", document.getElementById("taskPrefix").value);
 
-    if (isTaskOnlyMode) {
-        form.append("task_only", "true");
-    } else if (clarificationContext) {
+    if (clarificationContext) {
         form.append("context", JSON.stringify(clarificationContext));
     }
-
-    const wasClarification = !!clarificationContext && !isTaskOnlyMode;
 
     let data;
     try {
@@ -330,53 +318,52 @@ async function processAudio() {
         return;
     }
 
-    // Результат перезаписи номера задачи
-    if (data.status === "task_only_result") {
-        isTaskOnlyMode = false;
-        const fullTask1 = buildFullTask(data.task);
-        pendingEntry.task = fullTask1;
-        setState("idle", `Подтверди номер задачи: ${fullTask1}`);
-        showTaskModal(fullTask1);
-        return;
-    }
-
-    // Все поля заполнены — показываем модалку подтверждения (без голоса)
     if (data.status === "task_confirmation") {
-        isTaskOnlyMode = false;
-        const fullTask2 = buildFullTask(data.parsed.task);
-        pendingEntry = { ...data.parsed, task: fullTask2, transcribed: data.transcribed };
-        setState("idle", `Подтверди номер задачи: ${fullTask2}`);
-        showTaskModal(fullTask2);
+        const fullTask = buildFullTask(data.parsed.task);
+        pendingEntry = { ...data.parsed, task: fullTask, transcribed: data.transcribed };
+        clarificationAttempts = 0;
+        showFullFormModal(pendingEntry);
         return;
     }
 
-    const textToSpeak = (wasClarification && data.status === "success")
-        ? "Уточнения успешно записаны"
-        : data.voice_message;
+    if (data.status === "clarification") {
+        clarificationContext = data.context;
+        clarificationAttempts++;
 
-    setState("speaking", `Винни: «${textToSpeak}»`);
-    await speakText(textToSpeak);
+        if (clarificationAttempts >= 2) {
+            clarificationAttempts = 0;
+            clarificationContext  = null;
+            pendingEntry = { ...(data.context || {}), transcribed: "" };
+            await speakText("Не смог расслышать, заполни данные вручную");
+            showFullFormModal(data.context || {});
+        } else {
+            setState("speaking", `Винни: «${data.voice_message}»`);
+            await speakText(data.voice_message);
+            showMessage(data.voice_message);
+            setState("listening", "Жду ответа...");
+            setTimeout(() => startRecording(), 300);
+        }
+        return;
+    }
 
     if (data.status === "success") {
+        setState("speaking", `Винни: «${data.voice_message}»`);
+        await speakText(data.voice_message);
         showResult(data.id, data.transcribed, data.parsed, data.jira_status);
         loadEntries();
         returnToIdle();
-
-    } else if (data.status === "clarification") {
-        clarificationContext = data.context;
-        showMessage(data.voice_message);
-        setState("listening", "Жду ответа...");
-        setTimeout(() => startRecording(), 300);
-
-    } else {
-        showMessage(data.voice_message ?? "Произошла ошибка", "error");
-        returnToIdle();
+        return;
     }
+
+    setState("speaking", `Винни: «${data.voice_message ?? "Ошибка"}»`);
+    await speakText(data.voice_message ?? "Произошла ошибка");
+    showMessage(data.voice_message ?? "Произошла ошибка", "error");
+    returnToIdle();
 }
 
 function returnToIdle() {
-    clarificationContext = null;
-    isTaskOnlyMode       = false;
+    clarificationContext  = null;
+    clarificationAttempts = 0;
     setState("idle", "Слушаю... Скажи «Привет Ассистент»");
     startWakeWordDetection();
 }

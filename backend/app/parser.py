@@ -3,12 +3,13 @@ from datetime import date, timedelta
 
 from rapidfuzz import fuzz
 
-# Триггеры сортированы от длинных к коротким — важно для окна поиска
-TRIGGERS = [
-    ("дата выполнения задачи", "date"),
-    ("время на задачу",        "time_spent"),
-    ("действия по задаче",     "description"),
-    ("номер задачи",           "task"),
+# Для каждого поля — список фраз от длинных к коротким.
+# _find_triggers берёт только лучший вариант на поле.
+TRIGGERS: list[tuple[list[str], str]] = [
+    (["дата выполнения задачи", "дата выполнения"],         "date"),
+    (["время на задачу",        "время"],            "time_spent"),
+    (["действия по задаче",     "действия"],             "description"),
+    (["номер задачи",           "номер"],            "task"),
 ]
 
 FUZZY_THRESHOLD = 68  # % совпадения: допускает ~32% ошибок распознавания
@@ -158,38 +159,42 @@ def _normalize_date(raw: str) -> str | None:
 def _find_triggers(text: str) -> list[tuple[int, int, str]]:
     """
     Возвращает список (trigger_start, value_start, field) отсортированный по позиции.
-    trigger_start — для определения границ значений,
-    value_start   — откуда начинается само значение поля.
+    Для каждого поля берётся лучший из всех вариантов фраз.
     """
     text_lower = text.lower()
     words = text_lower.split()
 
-    # Позиции начала каждого слова в строке
     word_starts: list[int] = []
     pos = 0
     for w in words:
         word_starts.append(pos)
         pos += len(w) + 1
 
-    found: list[tuple[int, int, int, str]] = []  # (score, trig_start, val_start, field)
+    # field → (best_score, trig_start, val_start)
+    best_per_field: dict[str, tuple[int, int, int]] = {}
 
-    for trigger, field in TRIGGERS:
-        trigger_words = trigger.split()
-        n = len(trigger_words)
-        best_score, best_i = 0, -1
+    for phrases, field in TRIGGERS:
+        for trigger in phrases:
+            trigger_words = trigger.split()
+            n = len(trigger_words)
+            best_score, best_i = 0, -1
 
-        for i in range(len(words) - n + 1):
-            window = " ".join(words[i:i + n])
-            score = fuzz.ratio(window, trigger)
-            if score > best_score:
-                best_score, best_i = score, i
+            for i in range(len(words) - n + 1):
+                window = " ".join(words[i:i + n])
+                score = fuzz.ratio(window, trigger)
+                if score > best_score:
+                    best_score, best_i = score, i
 
-        if best_score >= FUZZY_THRESHOLD and best_i != -1:
-            trig_start = word_starts[best_i]
-            val_word_idx = best_i + n
-            val_start = word_starts[val_word_idx] if val_word_idx < len(word_starts) else len(text)
-            found.append((trig_start, val_start, field))
+            if best_score >= FUZZY_THRESHOLD and best_i != -1:
+                existing = best_per_field.get(field)
+                if existing is None or best_score > existing[0]:
+                    trig_start = word_starts[best_i]
+                    val_word_idx = best_i + n
+                    val_start = word_starts[val_word_idx] if val_word_idx < len(word_starts) else len(text)
+                    best_per_field[field] = (best_score, trig_start, val_start)
 
+    found = [(trig_start, val_start, field)
+             for field, (_, trig_start, val_start) in best_per_field.items()]
     return sorted(found, key=lambda x: x[0])
 
 

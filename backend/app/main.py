@@ -8,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .jira_client import find_issue, log_work
+from .config import settings
+from .jira_client import find_issue, jira_configured, log_work
 from .parser import parse_task_only, parse_worklog
 from .stt import get_model, transcribe
-from .worklog import get_entries, save_entry
+from .worklog import get_entries, get_entry_by_id, save_entry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -114,21 +115,29 @@ async def confirm(request: Request):
     log.info("Confirmed and saved entry #%d", entry_id)
 
     jira_status = "skipped"
-    if task != "—":
-        issue_summary = find_issue(task)
-        if issue_summary is None:
-            jira_status = "not_found"
-            voice_message = f"Записал, но задача {task} не найдена в Jira."
+    voice_message = "Запись успешно сохранена в файл."
+    if task != "—" and jira_configured():
+        if not description.strip():
+            jira_status = "error"
+            voice_message = "Записал в файл, но не залогировал в Jira: не указано описание."
         else:
-            ok = log_work(task, time_spent, date, description)
-            if ok:
-                jira_status = "ok"
-                voice_message = "Записал и залогировал в Jira."
-            else:
+            try:
+                issue_summary = find_issue(task)
+                if issue_summary is None:
+                    jira_status = "not_found"
+                    voice_message = f"Записал, но задача {task} не найдена в Jira."
+                else:
+                    ok = log_work(task, time_spent, date, description)
+                    if ok:
+                        jira_status = "ok"
+                        voice_message = "Записал и залогировал в Jira."
+                    else:
+                        jira_status = "error"
+                        voice_message = "Записал в файл, но не удалось залогировать в Jira."
+            except Exception as e:
+                log.error("Jira error: %s", e)
                 jira_status = "error"
-                voice_message = "Записал в файл, но не удалось залогировать в Jira."
-    else:
-        voice_message = "Запись успешно сохранена в файл."
+                voice_message = "Записал в файл, но не удалось подключиться к Jira."
 
     log.info("Jira status: %s", jira_status)
 
@@ -140,6 +149,32 @@ async def confirm(request: Request):
         "transcribed": transcribed,
         "parsed": data,
     })
+
+
+@app.get("/jira-test/{task_key}")
+async def jira_test(task_key: str):
+    import requests as _req
+    from .jira_client import _auth, _base_url, _headers, _get_token
+    configured = jira_configured()
+    if not configured:
+        return JSONResponse({"configured": False, "jira_url": settings.jira_url,
+                             "jira_email": settings.jira_email, "has_token": bool(_get_token())})
+    url = f"{_base_url()}/rest/api/3/issue/{task_key}"
+    try:
+        resp = _req.get(url, headers=_headers(), auth=_auth(), timeout=10)
+        return JSONResponse({"configured": True, "url": url, "status": resp.status_code,
+                             "email": settings.jira_email,
+                             "body_preview": resp.text[:300]})
+    except Exception as e:
+        return JSONResponse({"configured": True, "url": url, "error": str(e)})
+
+
+@app.get("/entries/{entry_id}")
+async def entry_by_id(entry_id: int):
+    entry = get_entry_by_id(entry_id)
+    if entry is None:
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    return entry
 
 
 @app.get("/entries")

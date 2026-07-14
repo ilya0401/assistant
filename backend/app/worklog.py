@@ -50,6 +50,28 @@ def save_entry(task: str, date: str, time_spent: str, description: str) -> int:
     return entry_id
 
 
+def get_entry_by_id(entry_id: int) -> dict | None:
+    path = _workbook_path()
+    if not path.exists():
+        return None
+
+    wb = openpyxl.load_workbook(path, read_only=True)
+    ws = wb.active
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row[0] == entry_id:
+            wb.close()
+            return {
+                "id": row[0],
+                "task": row[1],
+                "date": str(row[2]) if row[2] else "",
+                "time_spent": row[3],
+                "description": row[4],
+                "added": str(row[5]) if row[5] else "",
+            }
+    wb.close()
+    return None
+
+
 def get_entries(limit: int = 20) -> list[dict]:
     path = _workbook_path()
     if not path.exists():
