@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     whisper_model: str = "base"
     os_type: str = "macos"
     data_dir: str = "/data"
+    postgres_db: str = "vinnie"
+    postgres_user: str = "vinnie"
+    postgres_password: str = ""
+    db_host: str = "db"
+    db_port: int = 5432
 
     class Config:
         env_file = ".env"

@@ -1,96 +1,74 @@
-from datetime import datetime
-from pathlib import Path
+from datetime import date as date_cls
 
-import openpyxl
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+import psycopg
 
 from .config import settings
 
-HEADERS = ["#", "Номер задачи", "Дата выполнения задачи", "Время на задачу", "Действия по задаче", "Добавлено"]
-HEADER_COLOR = "2D3748"
+TABLE_NAME = "worklog_entries"
 
 
-def _workbook_path() -> Path:
-    return Path(settings.data_dir) / "worklog.xlsx"
+def get_connection() -> psycopg.Connection:
+    return psycopg.connect(
+        host=settings.db_host,
+        port=settings.db_port,
+        dbname=settings.postgres_db,
+        user=settings.postgres_user,
+        password=settings.postgres_password,
+    )
 
 
-def _init_workbook() -> Workbook:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Worklog"
-    ws.append(HEADERS)
+def init_db() -> None:
+    with get_connection() as conn:
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+                id          SERIAL PRIMARY KEY,
+                task        TEXT NOT NULL,
+                entry_date  DATE NOT NULL,
+                time_spent  TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                added_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
 
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor=HEADER_COLOR)
-    for cell in ws[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center")
 
-    ws.column_dimensions["A"].width = 6
-    ws.column_dimensions["B"].width = 20
-    ws.column_dimensions["C"].width = 14
-    ws.column_dimensions["D"].width = 12
-    ws.column_dimensions["E"].width = 50
-    ws.column_dimensions["F"].width = 22
-
-    wb.save(_workbook_path())
-    return wb
+def _row_to_dict(row) -> dict:
+    id_, task, entry_date, time_spent, description, added_at = row
+    return {
+        "id": id_,
+        "task": task,
+        "date": entry_date.isoformat() if entry_date else "",
+        "time_spent": time_spent,
+        "description": description,
+        "added": added_at.strftime("%Y-%m-%d %H:%M") if added_at else "",
+    }
 
 
 def save_entry(task: str, date: str, time_spent: str, description: str) -> int:
-    path = _workbook_path()
-    wb = openpyxl.load_workbook(path) if path.exists() else _init_workbook()
-    ws = wb.active
-
-    entry_id = ws.max_row  # row 1 = header, so first entry gets id=1
-    ws.append([entry_id, task, date, time_spent, description, datetime.now().strftime("%Y-%m-%d %H:%M")])
-    wb.save(path)
-    return entry_id
+    entry_date = date_cls.fromisoformat(date)
+    with get_connection() as conn:
+        cur = conn.execute(
+            f"INSERT INTO {TABLE_NAME} (task, entry_date, time_spent, description) "
+            "VALUES (%s, %s, %s, %s) RETURNING id",
+            (task, entry_date, time_spent, description),
+        )
+        return cur.fetchone()[0]
 
 
 def get_entry_by_id(entry_id: int) -> dict | None:
-    path = _workbook_path()
-    if not path.exists():
-        return None
-
-    wb = openpyxl.load_workbook(path, read_only=True)
-    ws = wb.active
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0] == entry_id:
-            wb.close()
-            return {
-                "id": row[0],
-                "task": row[1],
-                "date": str(row[2]) if row[2] else "",
-                "time_spent": row[3],
-                "description": row[4],
-                "added": str(row[5]) if row[5] else "",
-            }
-    wb.close()
-    return None
+    with get_connection() as conn:
+        row = conn.execute(
+            f"SELECT id, task, entry_date, time_spent, description, added_at "
+            f"FROM {TABLE_NAME} WHERE id = %s",
+            (entry_id,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
 
 
 def get_entries(limit: int = 20) -> list[dict]:
-    path = _workbook_path()
-    if not path.exists():
-        return []
-
-    wb = openpyxl.load_workbook(path, read_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
-
-    result = []
-    for row in rows[-limit:]:
-        if row[0] is not None:
-            result.append({
-                "id": row[0],
-                "task": row[1],
-                "date": str(row[2]) if row[2] else "",
-                "time_spent": row[3],
-                "description": row[4],
-                "added": str(row[5]) if row[5] else "",
-            })
-    return list(reversed(result))
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT id, task, entry_date, time_spent, description, added_at "
+            f"FROM {TABLE_NAME} ORDER BY id DESC LIMIT %s",
+            (limit,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]

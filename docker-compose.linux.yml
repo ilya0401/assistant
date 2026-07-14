@@ -11,10 +11,29 @@ services:
     env_file: .env
     environment:
       - OS_TYPE=linux
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     dns:
       - 8.8.8.8
       - 8.8.4.4
 
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   whisper_cache:
+  pgdata:

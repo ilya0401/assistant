@@ -12,7 +12,7 @@ from .config import settings
 from .jira_client import find_issue, jira_configured, log_work
 from .parser import parse_task_only, parse_worklog
 from .stt import get_model, transcribe
-from .worklog import get_entries, get_entry_by_id, save_entry
+from .worklog import get_entries, get_entry_by_id, init_db, save_entry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
+    log.info("Postgres table ready.")
     log.info("Loading Whisper model (first run may take a few minutes to download)...")
     get_model()
     log.info("Whisper model ready.")
@@ -111,7 +113,13 @@ async def confirm(request: Request):
     description = data.get("description") or ""
     transcribed = data.get("transcribed") or ""
 
-    entry_id = save_entry(task=task, date=date, time_spent=time_spent, description=description)
+    try:
+        entry_id = save_entry(task=task, date=date, time_spent=time_spent, description=description)
+    except ValueError:
+        return JSONResponse({
+            "status": "error",
+            "voice_message": "Некорректная дата. Используй формат ГГГГ-ММ-ДД, например 2026-07-14.",
+        })
     log.info("Confirmed and saved entry #%d", entry_id)
 
     jira_status = "skipped"
