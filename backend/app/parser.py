@@ -130,11 +130,20 @@ def _normalize_time(raw: str) -> str:
 def _normalize_date(raw: str) -> str | None:
     """Возвращает дату ISO или None если не удалось распознать."""
     s = raw.strip().lower()
+
+    # Уже в формате ISO (например, пришло повторно из context) — не трогаем,
+    # иначе цифры даты ошибочно распознаются регэкспом дд.мм.гггг ниже.
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        try:
+            return date.fromisoformat(s).isoformat()
+        except ValueError:
+            return None
+
     today = date.today()
     for word, delta in _DATE_WORDS.items():
         if word in s:
             return (today + timedelta(days=delta)).isoformat()
-    m = re.search(r"(\d{1,2})[^\d]+(\w+)", s)
+    m = re.search(r"(\d{1,2})[^\d]+?(\w+)", s)
     if m:
         day, month_str = int(m.group(1)), m.group(2)[:6]
         for key, num in _MONTHS_RU.items():
