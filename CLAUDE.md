@@ -44,7 +44,7 @@ backend/
     main.py         FastAPI entry point; routes: POST /process, GET /entries, static mount
     stt.py          Loads faster-whisper model once at startup; transcribes uploaded WebM audio
     parser.py       Extracts task/time/date/description using fuzzy keyword matching (rapidfuzz)
-    worklog.py      psycopg (raw SQL) read/write against the Postgres `worklog_entries` table
+    worklog.py      psycopg (raw SQL) read/write against Postgres — normalized `worklog_entries` (task_id FK) + `tasks` (task_key lookup) tables, joined on read
     config.py       Pydantic Settings loading from .env
   scripts/
     migrate_xlsx_to_postgres.py   One-off tool that imports the legacy data/worklog.xlsx into Postgres; already run once, kept for reference

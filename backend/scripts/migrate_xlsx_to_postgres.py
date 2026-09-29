@@ -13,7 +13,7 @@ from pathlib import Path
 import openpyxl
 
 from app.config import settings
-from app.worklog import TABLE_NAME, get_connection, init_db
+from app.worklog import TABLE_NAME, _get_or_create_task_id, get_connection, init_db
 
 
 def _parse_added(raw) -> datetime:
@@ -57,10 +57,11 @@ def main() -> None:
         for entry_id, task, raw_date, time_spent, description, raw_added in rows:
             added_at = _parse_added(raw_added)
             entry_date = _parse_date(raw_date, added_at)
+            task_id = _get_or_create_task_id(conn, task or "—")
             conn.execute(
-                f"INSERT INTO {TABLE_NAME} (id, task, entry_date, time_spent, description, added_at) "
+                f"INSERT INTO {TABLE_NAME} (id, task_id, entry_date, time_spent, description, added_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING",
-                (entry_id, task or "—", entry_date, time_spent or "—", description or "", added_at),
+                (entry_id, task_id, entry_date, time_spent or "—", description or "", added_at),
             )
         conn.execute(
             f"SELECT setval(pg_get_serial_sequence('{TABLE_NAME}', 'id'), "
