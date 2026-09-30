@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
-from .jira_client import find_issue, jira_configured, log_work
+from .jira_client import jira_configured
 from .kafka_producer import publish_worklog_entry
 from .parser import parse_task_only, parse_worklog
 from .stt import get_model, transcribe
@@ -123,35 +123,17 @@ async def confirm(request: Request):
         })
     log.info("Confirmed and saved entry #%d", entry_id)
 
-    try:
-        publish_worklog_entry(entry_id, task, time_spent, date, description)
-    except Exception as e:
-        log.error("Kafka publish error: %s", e)
-
     jira_status = "skipped"
     voice_message = "Запись успешно сохранена в файл."
     if task != "—" and jira_configured():
-        if not description.strip():
+        try:
+            publish_worklog_entry(entry_id, task, time_spent, date, description)
+            jira_status = "queued"
+            voice_message = "Записал, доставляю в Jira."
+        except Exception as e:
+            log.error("Kafka publish error: %s", e)
             jira_status = "error"
-            voice_message = "Записал в файл, но не залогировал в Jira: не указано описание."
-        else:
-            try:
-                issue_summary = find_issue(task)
-                if issue_summary is None:
-                    jira_status = "not_found"
-                    voice_message = f"Записал, но задача {task} не найдена в Jira."
-                else:
-                    ok = log_work(task, time_spent, date, description)
-                    if ok:
-                        jira_status = "ok"
-                        voice_message = "Записал и залогировал в Jira."
-                    else:
-                        jira_status = "error"
-                        voice_message = "Записал в файл, но не удалось залогировать в Jira."
-            except Exception as e:
-                log.error("Jira error: %s", e)
-                jira_status = "error"
-                voice_message = "Записал в файл, но не удалось подключиться к Jira."
+            voice_message = "Записал в файл, но не удалось поставить задачу на доставку в Jira."
 
     log.info("Jira status: %s", jira_status)
 

@@ -23,6 +23,26 @@ services:
     networks:
       - vinnie-network
 
+  jira-consumer:
+    build:
+      context: ./backend
+    pull_policy: never
+    command: python -m app.jira_consumer
+    volumes:
+      - ./backend/app:/app/app:ro
+    env_file: .env
+    environment:
+      - OS_TYPE=macos
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - vinnie-network
+
   db:
     image: postgres:16-alpine
     environment:

@@ -73,10 +73,9 @@ function esc(str) {
 
 function showResult(id, transcribed, parsed, jiraStatus) {
     const jiraLabels = {
-        ok:        '<span class="jira-badge jira-ok">✓ Залогировано в Jira</span>',
-        not_found: '<span class="jira-badge jira-warn">⚠ Задача не найдена в Jira</span>',
-        error:     '<span class="jira-badge jira-warn">⚠ Ошибка подключения к Jira</span>',
-        skipped:   '',
+        queued: '<span class="jira-badge jira-queued">⏳ Доставляется в Jira</span>',
+        error:  '<span class="jira-badge jira-warn">⚠ Ошибка подключения к Jira</span>',
+        skipped: '',
     };
     const jiraHtml = jiraLabels[jiraStatus] ?? "";
 
