@@ -2,10 +2,10 @@ import json
 import logging
 import time
 
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, TopicPartition
 
 from .config import settings
-from .jira_client import find_issue, jira_configured, log_work
+from .jira_client import find_issue, jira_configured, log_work, token_valid
 from .kafka_producer import TOPIC
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -35,6 +35,10 @@ def _deliver(payload: dict) -> bool:
         return False
 
     if issue_summary is None:
+        if not token_valid():
+            log.error("Entry #%s: task %s not found, but credentials also look invalid — "
+                      "treating as auth failure, will retry", entry_id, task)
+            return False
         log.warning("Entry #%s: task %s not found in Jira, giving up", entry_id, task)
         return True
 
@@ -70,6 +74,10 @@ def main() -> None:
             if _deliver(payload):
                 consumer.commit(msg)
             else:
+                # poll() advances the fetch position regardless of commit — without an
+                # explicit seek back, the next poll() would move on to the following
+                # message instead of retrying this one.
+                consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
                 time.sleep(RETRY_BACKOFF_SECONDS)
     finally:
         consumer.close()

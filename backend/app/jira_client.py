@@ -36,6 +36,20 @@ def jira_configured() -> bool:
     return bool(settings.jira_url and settings.jira_email and _get_token())
 
 
+def token_valid() -> bool:
+    """Checks that the current credentials are actually accepted by Jira.
+
+    Jira returns 404 (not 401/403) for both "issue doesn't exist" and
+    "no permission to see it" — including a bad/expired token, since it
+    never reveals whether a resource exists to an unauthorized caller.
+    This hits an endpoint that doesn't depend on any specific resource,
+    to tell those two cases apart.
+    """
+    url = f"{_base_url()}/rest/api/3/myself"
+    resp = requests.get(url, headers=_headers(), auth=_auth(), timeout=15)
+    return resp.status_code == 200
+
+
 def find_issue(task_key: str) -> str | None:
     """Returns issue summary if found, None if not found (404), raises on error."""
     url = f"{_base_url()}/rest/api/3/issue/{task_key}"
