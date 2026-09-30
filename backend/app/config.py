@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     db_host: str = "db"
     db_port: int = 5432
+    kafka_bootstrap_servers: str = "kafka:9092"
 
     class Config:
         env_file = ".env"

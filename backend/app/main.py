@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .jira_client import find_issue, jira_configured, log_work
+from .kafka_producer import publish_worklog_entry
 from .parser import parse_task_only, parse_worklog
 from .stt import get_model, transcribe
 from .worklog import get_entries, get_entry_by_id, init_db, save_entry
@@ -121,6 +122,11 @@ async def confirm(request: Request):
             "voice_message": "Некорректная дата. Используй формат ГГГГ-ММ-ДД, например 2026-07-14.",
         })
     log.info("Confirmed and saved entry #%d", entry_id)
+
+    try:
+        publish_worklog_entry(entry_id, task, time_spent, date, description)
+    except Exception as e:
+        log.error("Kafka publish error: %s", e)
 
     jira_status = "skipped"
     voice_message = "Запись успешно сохранена в файл."
