@@ -5,7 +5,7 @@ import time
 from confluent_kafka import Consumer, TopicPartition
 
 from .config import settings
-from .jira_client import find_issue, jira_configured, log_work, token_valid
+from .jira_client import JiraPermanentError, find_issue, jira_configured, log_work, token_valid
 from .kafka_producer import TOPIC
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -42,7 +42,12 @@ def _deliver(payload: dict) -> bool:
         log.warning("Entry #%s: task %s not found in Jira, giving up", entry_id, task)
         return True
 
-    ok = log_work(task, payload["time_spent"], payload["date"], payload["description"])
+    try:
+        ok = log_work(task, payload["time_spent"], payload["date"], payload["description"])
+    except JiraPermanentError as e:
+        log.warning("Entry #%s: log_work rejected by Jira as invalid, giving up: %s", entry_id, e)
+        return True
+
     if ok:
         log.info("Entry #%s: logged to Jira (%s)", entry_id, task)
         return True

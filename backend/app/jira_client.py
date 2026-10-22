@@ -8,6 +8,12 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 
+class JiraPermanentError(Exception):
+    """Jira отказала так, что повтор того же запроса даст тот же результат
+    (400 Bad Request — невалидные данные). Отличается от сетевых/5xx сбоев,
+    которые имеет смысл ретраить."""
+
+
 def _get_token() -> str:
     if settings.jira_token_file:
         try:
@@ -63,7 +69,10 @@ def find_issue(task_key: str) -> str | None:
 
 
 def log_work(task_key: str, time_spent: str, date: str, description: str) -> bool:
-    """Logs work to Jira issue worklog. Returns True on success."""
+    """Logs work to Jira issue worklog. Returns True on success, False on a
+    transient failure worth retrying. Raises JiraPermanentError on 400 Bad
+    Request — Jira rejected the payload itself (e.g. empty timeSpent), and
+    retrying the exact same payload will fail the same way every time."""
     if not settings.jira_url or not settings.jira_email or not _get_token():
         return False
     url = f"{_base_url()}/rest/api/3/issue/{task_key}/worklog"
@@ -92,7 +101,11 @@ def log_work(task_key: str, time_spent: str, date: str, description: str) -> boo
         if resp.status_code in (200, 201):
             return True
         log.warning("Jira log_work %s: HTTP %d — %s", task_key, resp.status_code, resp.text[:200])
+        if resp.status_code == 400:
+            raise JiraPermanentError(f"HTTP 400 — {resp.text[:200]}")
         return False
+    except JiraPermanentError:
+        raise
     except Exception as e:
         log.error("Jira log_work error: %s", e)
         return False
