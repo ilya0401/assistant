@@ -3,6 +3,7 @@
 
 # Local-only project instructions
 CLAUDE.md
+.claude/settings.local.json
 
 # Data
 data/
