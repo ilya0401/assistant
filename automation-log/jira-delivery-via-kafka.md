@@ -106,3 +106,59 @@ Docker, ни от самой Kafka напрямую — только HTTP чер
 TC-001 полный контент сообщения, TC-003, TC-004, TC-005, TC-007/012 lag, TC-008/009/010, TC-015 lag,
 TC-016, TC-017) не тронуто — требует либо сетевого Kafka-клиента, либо управления
 контейнерами/конфигом, чего пока нет.
+
+## 2026-10-27 (группа E)
+
+### Находка: kafka-ui как Jenkins-совместимая замена docker exec
+
+`kafka-ui` (`ghcr.io/kafbat/kafka-ui`) уже в сети `vinnie-network`, порт 8080 внутри сети (8090
+снаружи). Проверено живьём из контейнера Jenkins: `curl http://kafka-ui:8080/...` — HTTP 200, без
+`docker exec`, без доступа к сокету. Рабочий эндпоинт для lag:
+`GET /api/clusters/{cluster}/topics/{topic}/consumer-groups` → поле `consumerLag` на объект группы
+(`groupId` совпадает с `GROUP_ID = "jira-delivery"` из `jira_consumer.py:14`). Эндпоинт чтения
+сообщений (`/messages`) у этого форка работает иначе (не простой GET) — не разобрался с первой
+попытки, не стал тратить время дальше; полный контент сообщения (TC-001) остаётся недоступен так
+же, как раньше.
+
+Решение по поведению при недоступности `kafka-ui` — обсудили явно с пользователем: падать (fail),
+не skip. `kafka-ui` теперь такая же обычная сетевая зависимость, как сам `vinnie`, а не хрупкий
+`docker exec` — молчаливый skip тут неуместен.
+
+### Ревью покрытия (релевантная часть)
+
+| TC-ID | REQ-ID | Статус | Существующий тест | Комментарий |
+|---|---|---|---|---|
+| TC-011 | REQ-JKCONS-006 | Автоматизирован, неполно → **усилен** | `test_entry_worklog_appears_in_jira` | + `kafka_ui_api.wait_for_zero_lag()` после проверки worklog |
+| TC-007, TC-012 | REQ-JKCONS-003/006 | Автоматизирован, неполно → **усилен** | `test_nonexistent_task_returns_not_found` | + lag-проверка вместо отсутствовавшего ожидания вообще |
+| TC-013, TC-014 | REQ-JKCONS-007 | Автоматизирован, неполно → **усилен** | `test_invalid_entry_does_not_appear_in_jira` | Заменили фиксированный `time.sleep(15)` на `wait_for_zero_lag` — быстрее и детерминированнее |
+| TC-015 | REQ-JKCONS-008 | Автоматизирован, слабо → **усилен, подтверждён как regression-guard** | `test_invalid_entry_does_not_appear_in_jira[empty_time_spent]` | См. проверку ниже — теперь реально различает баг/фикс |
+
+### План
+
+| TC-ID | REQ-ID | Действие | Что меняется | Файл автотеста | Статус |
+|---|---|---|---|---|---|
+| TC-011 | REQ-JKCONS-006 | Переписать (усилить) | + `wait_for_zero_lag` после проверки worklog | tests/api/test_jira_integration.py::test_entry_worklog_appears_in_jira | Прогнано (pass) |
+| TC-007, TC-012 | REQ-JKCONS-003/006 | Переписать (усилить) | + `wait_for_zero_lag` после локальной проверки | tests/api/test_jira_sync.py::test_nonexistent_task_returns_not_found | Прогнано (pass) |
+| TC-013, TC-014, TC-015 | REQ-JKCONS-007/008 | Переписать (усилить) | `time.sleep(15)` → `wait_for_zero_lag` | tests/api/test_jira_integration.py::test_invalid_entry_does_not_appear_in_jira | Прогнано (pass) |
+
+Новая инфраструктура: `utils/kafka_ui_API.py` (`KafkaUiApi`, по тому же паттерну, что
+`jira_API.py`/`vinny_API.py` — подкласс `BaseApi`), `utils/models/kafka_ui_models.py`
+(`ConsumerGroupInfo`), фикстура `kafka_ui_api` в `conftest.py`, переменная `KAFKA_UI_URL`
+в `.env.test` (`http://localhost:8090`) и `Jenkinsfile` (`http://kafka-ui:8080`).
+
+### Проверка regression-guard для TC-015 (обязательный шаг 4 скилла)
+
+Временно откатил фикс KAN-3 (`git checkout 897481b~1 -- backend/app/jira_client.py
+backend/app/jira_consumer.py`), перезапустил `jira-consumer` (код монтируется volume'ом, пересборка
+не нужна). Прогнал `test_invalid_entry_does_not_appear_in_jira[empty_time_spent]` —
+**упал red**: `AssertionError: Lag консьюмер-группы 'jira-delivery' ... не вернулся к 0 за 30с
+(последнее значение: 1)` — ровно баг KAN-3 (бесконечный retry блокирует партицию). Вернул фикс
+(`git checkout HEAD -- ...`), перезапустил consumer — **тест снова зелёный**, lag вернулся к 0.
+Это подтверждает, что тест реально ловит регрессию, а не проходит "на всякий случай".
+
+Полный прогон после восстановления фикса: 12 тестов (без db), все зелёные, **35.37с**
+(было 68.92с — lag-опрос с интервалом быстрее, чем фиксированные `sleep(15)`).
+
+Отложено без изменений (группа D): TC-001 (полный контент сообщения — эндпоинт `/messages` у
+`kafka-ui` не поддался с первой попытки), TC-003, TC-004, TC-005 (`kafka-ui` в read-only режиме,
+управлять контейнерами через него нельзя), TC-008/009/010, TC-016, TC-017.
