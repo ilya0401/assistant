@@ -125,9 +125,9 @@ vinnie-tests/test-cases/<слаг>.<md|csv|xlsx>       — каноническ�
 
 ## Пример интеграции с автотестами (vinnie-tests: pytest + Allure)
 
-Если проект уже использует pytest + Allure (как в вашем vinnie-tests), держи `TC-001` как `allure.id("TC-001")` или в `@allure.title()` над соответствующим тестом — тогда трассировка "требование → тест-кейс → автотест" не теряется при переходе от дизайна к коду:
+Если проект уже использует pytest + Allure (как в вашем vinnie-tests), держи `TC-001` как `allure.label("tc_id", "TC-001")` над соответствующим тестом — тогда трассировка "требование → тест-кейс → автотест" не теряется при переходе от дизайна к коду. Не используй `@allure.id(...)` для этого — в Allure это поле зарезервировано под Allure TestOps, не под произвольный внешний ID (см. test-automation):
 ```python
-@allure.id("TC-001")
+@allure.label("tc_id", "TC-001")
 @allure.title("Неполный голосовой ввод запрашивает уточнение")
 def test_incomplete_input_requests_clarification():
     ...
