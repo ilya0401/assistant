@@ -1,3 +1,4 @@
+import re
 from datetime import date as date_cls
 
 import psycopg
@@ -6,6 +7,12 @@ from .config import settings
 
 TABLE_NAME = "worklog_entries"
 TASKS_TABLE = "tasks"
+
+# date.fromisoformat() принимает в Python 3.11+ не только "YYYY-MM-DD", но и
+# compact ISO ("20260714") и ISO week-date ("2026-W29-2") — а jira_client.log_work()
+# парсит ту же строку строго как "%Y-%m-%d" (KAN-4). Ограничиваем здесь тот же набор,
+# чтобы запись не "сохранялась" с датой, которую Jira-доставка не сможет разобрать.
+_STRICT_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def get_connection() -> psycopg.Connection:
@@ -62,6 +69,8 @@ def _row_to_dict(row) -> dict:
 
 
 def save_entry(task: str, date: str, time_spent: str, description: str) -> int:
+    if not _STRICT_ISO_DATE.match(date):
+        raise ValueError(f"date must be strict YYYY-MM-DD, got {date!r}")
     entry_date = date_cls.fromisoformat(date)
     with get_connection() as conn:
         task_id = _get_or_create_task_id(conn, task)
