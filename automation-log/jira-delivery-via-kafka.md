@@ -685,3 +685,72 @@ None` — не дождался воркалога даже за 90с) и, чт�
 `test_jira_sync.py` + `test_jira_integration.py` вместе — **17 passed** (142.3с, быстрее
 прошлых прогонов — очередь не копится между тестами). Полный набор
 (`-m "not db and not chaos"`) — **28 passed** (240.2с).
+
+## 2026-10-28 (продолжение) — KAN-6: сетевой сбой в token_valid() ронял весь консьюмер
+
+### Контекст
+
+Build #155: ERROR на setup первого теста (`drain_jira_delivery_queue` не дождалась lag=0 за
+90с — лаг застрял ещё ДО старта прогона) + FAILED на `task_1_zero_minutes`. В логах
+`jira-consumer` обнаружен полный traceback краша процесса: необработанный
+`requests.exceptions.ConnectionError` (NameResolutionError) в `token_valid()`, вызванном из
+ветки `_deliver()` для 404-задач, убивает весь процесс консьюмера. Docker перезапускает
+контейнер (`restart: unless-stopped`), но на время краша+рестарта вся партиция Kafka не
+обслуживается — не просто retry одного сообщения, а полный простой очереди.
+
+### Находка
+
+`find_issue()`/`log_work()` уже обёрнуты в try/except (чинили в KAN-5), а `token_valid()` —
+единственный прямой вызов Jira в `_deliver()` без защиты:
+
+```python
+if issue_summary is None:
+    if not token_valid():   # requests.get() без try/except — исключение убивает процесс
+```
+
+Протриажено: детерминированно, воспроизводится без правок тестов, причина — код приложения
+(отсутствие обработки исключения на одном конкретном пути), не окружение и не устаревший тест.
+Заведён **KAN-6** (`tools/jira_bug_report`, `--severity high`,
+`fingerprint-seed="jira-consumer:token_valid-unhandled-exception-crashes-consumer-process"`),
+дубликатов не найдено.
+
+### Решение
+
+`backend/app/jira_consumer.py::_deliver()` — вызов `token_valid()` обёрнут в try/except:
+сетевой сбой теперь логируется и возвращает `False` (сообщение уходит в штатный retry с
+backoff), как уже сделано для `find_issue`/`log_work`, без краша процесса.
+
+Детерминированно воспроизвести именно эту гонку (DNS-сбой ровно во время `token_valid()`, но
+не во время предшествующего `find_issue()`) через реальный HTTP/DNS нельзя — поэтому **впервые
+добавлен юнит-тест** прямо в `vinnie-assistant` (там раньше тестов не было вовсе, весь тестовый
+код жил в `vinnie-tests` как black-box):
+- `backend/requirements-dev.txt` (только `pytest`, не попадает в Docker-образ — Dockerfile
+  ставит только `requirements.txt`).
+- `backend/tests/test_jira_consumer.py::test_network_failure_in_token_valid_does_not_crash_consumer`
+  — мокает `find_issue`→`None`, `token_valid`→бросает `ConnectionError`, вызывает `_deliver()`
+  напрямую, проверяет `result is False` (а не что исключение всплыло).
+
+Red/green подтверждён локальным venv (`backend/.venv`, не коммитится):
+`git stash` фикса → тест ловит `ConnectionError`, всплывший из `_deliver()` (красный,
+воспроизводит ровно тот же краш, что в логах) → `git stash pop` → тест зелёный.
+
+**Дополнительно подтверждено в реальном стеке**: после рестарта `jira-consumer` с фиксом, в
+логах зафиксирован настоящий (не смоделированный) сетевой сбой именно на этом пути —
+`"Entry #1458: token_valid check failed, will retry: ...NameResolutionError..."` — без
+последующего краша/рестарта процесса (не было новой строки `"Jira consumer started,
+listening"` после этого события).
+
+### Прогон
+
+`backend/tests/test_jira_consumer.py` — 1 passed (локальный venv). Live-подтверждение в
+реальном стеке — см. выше.
+
+### Отдельное наблюдение — DNS-нестабильность резко усилилась
+
+Полный прогон `vinnie-tests` (`-m "not db and not chaos"`) после фикса KAN-6 занял **606с
+(10 минут)** вместо обычных 2-4 минут и всё равно не прошёл (1 failed, 2 errors на setup) — в
+логах `jira-consumer` видно, что отдельные записи сейчас ретраятся из-за DNS **непрерывно по
+1-2 минуты подряд** (Entry #1447: с 15:00:25 по 15:02:20). Это уже не лечится правками в
+тестах/таймаутах — степень деградации DNS-слоя Docker Desktop на этой машине прямо сейчас
+значительно выше, чем в начале сессии. Решение отложено на уровень инфраструктуры (перезагрузка
+машины), не кода — см. следующую секцию.

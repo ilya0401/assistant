@@ -38,7 +38,12 @@ def _deliver(payload: dict) -> bool:
         return False
 
     if issue_summary is None:
-        if not token_valid():
+        try:
+            credentials_ok = token_valid()
+        except Exception as e:
+            log.error("Entry #%s: token_valid check failed, will retry: %s", entry_id, e)
+            return False
+        if not credentials_ok:
             log.error("Entry #%s: task %s not found, but credentials also look invalid — "
                       "treating as auth failure, will retry", entry_id, task)
             return False
