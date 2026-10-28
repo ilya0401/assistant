@@ -491,3 +491,40 @@ task_key = "KAN-1%00" -> HTTP 400
 
 Пункт 4 (баг в `find_issue()`) сознательно не взят в работу в этом заходе — решение отложено
 до отдельного подтверждения пользователем.
+
+## 2026-10-28 (KAN-5: фикс + regression-guard)
+
+Завёл баг KAN-5 через `jira-bug-reporter` (без дублей по fingerprint), с анализом фикса прямо
+в поле Expected — переиспользовать уже существующий `JiraPermanentError` (сейчас только в
+`log_work()` для HTTP 400) в `find_issue()` для той же ситуации.
+
+### Фикс
+
+- `backend/app/jira_client.py::find_issue()` — явно ловит `400` и поднимает `JiraPermanentError`
+  (раньше падало в общий `resp.raise_for_status()`, не различая permanent client-error от
+  transient 5xx/сетевых сбоев).
+- `backend/app/jira_consumer.py::_deliver()` — ловит `JiraPermanentError` отдельно от generic
+  `Exception` вокруг вызова `find_issue()`, возвращает `True` (give up, коммитит offset) — тот
+  же паттерн, что уже был для `log_work()`'s 400-кейса.
+
+401/403/5xx продолжают ретраиться как раньше — фикс точечный, не трогает транзиентные сбои.
+
+### Regression-guard (обязательный шаг 4 скилла test-automation)
+
+Воспроизвёл через реальный пайплайн (`task="KAN-1%00"`, Jira отвечает `400`, не `404`):
+консьюмер ретраил каждые ~5с бесконечно (`"find_issue error, will retry"`), lag не возвращался
+к 0. Откатил фикс (`git stash`), перезапустил consumer, прогнал новый тест
+`test_malformed_task_key_does_not_retry_forever` — упал **red** (`"Lag... не вернулся к 0 за
+30с"`). Вернул фикс (`git stash pop`), перезапустил consumer — тот же "застрявший" offset сам
+разрешился (`"giving up"` в логе), тест зелёный.
+
+Новый тест: `tests/api/test_jira_sync.py::TestJiraSyncStatus::test_malformed_task_key_does_not_retry_forever`
+(`@allure.label("bug_id", "KAN-5")`) — аналог `test_nonexistent_task_returns_not_found`
+(TC-007/012), но для malformed-ключа (`400`) вместо well-formed-nonexistent (`404`) — отдельная,
+ранее не покрытая ветка `_deliver()`.
+
+Полный прогон: **28 passed** (было 27).
+
+Добавлен комментарий на KAN-5 с подтверждением фикса и теста. Статус тикета не двигаю —
+`tools/jira_bug_report` поддерживает только `file`/`comment`, переход статуса — решение
+пользователя в самой Jira.

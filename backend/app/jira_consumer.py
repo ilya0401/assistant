@@ -30,6 +30,9 @@ def _deliver(payload: dict) -> bool:
 
     try:
         issue_summary = find_issue(task)
+    except JiraPermanentError as e:
+        log.warning("Entry #%s: find_issue rejected task %s as malformed, giving up: %s", entry_id, task, e)
+        return True
     except Exception as e:
         log.error("Entry #%s: find_issue error, will retry: %s", entry_id, e)
         return False

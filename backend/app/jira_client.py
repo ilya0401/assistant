@@ -57,7 +57,11 @@ def token_valid() -> bool:
 
 
 def find_issue(task_key: str) -> str | None:
-    """Returns issue summary if found, None if not found (404), raises on error."""
+    """Returns issue summary if found, None if not found (404). Raises
+    JiraPermanentError on 400 Bad Request — Jira rejected the key itself
+    (e.g. a malformed task key), and retrying the exact same key will fail
+    the same way every time (KAN-5). Raises plain on anything else (5xx,
+    network) — those are worth retrying."""
     url = f"{_base_url()}/rest/api/3/issue/{task_key}"
     resp = requests.get(url, headers=_headers(), auth=_auth(), timeout=15)
     log.info("Jira find_issue %s: HTTP %d", task_key, resp.status_code)
@@ -65,6 +69,8 @@ def find_issue(task_key: str) -> str | None:
         return resp.json().get("fields", {}).get("summary", "")
     if resp.status_code == 404:
         return None
+    if resp.status_code == 400:
+        raise JiraPermanentError(f"HTTP 400 — malformed task key {task_key!r}: {resp.text[:200]}")
     resp.raise_for_status()
 
 
