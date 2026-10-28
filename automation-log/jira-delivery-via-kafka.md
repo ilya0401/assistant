@@ -589,3 +589,52 @@ KAN-5 — ни один из них не трогает сеть/DNS. Причи
 `tests/api/test_jira_sync.py` — 5 passed. `tests/api/test_jira_integration.py` — 12 passed.
 Полный набор (`-m "not db and not chaos"`) — **28 passed** (без изменений в числе тестов,
 только в таймаутах).
+
+## 2026-10-28 (продолжение) — та же проблема вернулась в build #153, донастроили таймауты
+
+### Контекст
+
+После пуша мер из предыдущей секции build #153 всё равно упал — на этот раз на
+`test_invalid_entry_does_not_appear_in_jira[negative_time_spent]` (lag не вернулся к 0 за
+60с) и `test_jira_connection_reports_not_found_for_nonexistent_task` (`status == None` вместо
+404, та же `NameResolutionError`).
+
+### Находка
+
+Два отдельных пробела:
+
+1. **Пропущенный тест**: retry-обёртку на прошлом шаге добавили только в
+   `test_jira_connection_is_configured_and_reachable` (ждёт 200), но забыли про точно такой же
+   незащищённый синхронный вызов в `test_jira_connection_reports_not_found_for_nonexistent_task`
+   (ждёт 404) — тот вызывает тот же `check_jira_connection` без единого ретрая.
+2. **DNS-сбои идут кластерами**: в логах `jira-consumer` за время прогона — 2-3
+   `NameResolutionError` подряд на одну и ту же запись (Entry #1357: 14:07:25 → 14:07:44 →
+   14:07:57, итог ~49с на одну запись). Это Kafka-очередь с одним консьюмером на партицию —
+   застрявшая запись блокирует все последующие в очереди. Поэтому `timeout=60` в конкретном
+   тесте не всегда достаточно: лаг не упадёт к 0, пока не разрулится именно блокирующая запись,
+   независимо от таймаута более поздних тестов.
+
+### Решение
+
+Обсудили с пользователем: причину (нестабильность Docker Desktop) из кода не починить,
+дальнейшее увеличение таймаутов — осознанный временный костыль с понятным пределом
+полезности (при совсем плохом кластере DNS-сбоев не поможет и это). Пользователь подтвердил
+этот путь.
+
+- `tests/api/test_jira_sync.py::test_jira_connection_reports_not_found_for_nonexistent_task` —
+  обёрнут в тот же `wait_until`-retry, что и `test_jira_connection_is_configured_and_reachable`
+  (ждём именно `status == 404`, не просто ответ).
+- Таймауты подняты ещё раз:
+  - `test_entry_worklog_appears_in_jira`: `wait_until` на появление воркалога `60` → `90`;
+    последующий `wait_for_zero_lag` в том же тесте `20` → `30`.
+  - `test_invalid_entry_does_not_appear_in_jira`: `wait_for_zero_lag` `60` → `90`.
+  - `test_nonexistent_task_returns_not_found`, `test_malformed_task_key_does_not_retry_forever`:
+    `wait_for_zero_lag` `60` → `90`.
+  - `test_jira_connection_is_configured_and_reachable`,
+    `test_jira_connection_reports_not_found_for_nonexistent_task`: синхронный retry
+    `timeout=15, interval=5` (3 попытки) → `timeout=30, interval=5` (6 попыток).
+
+### Прогон
+
+`tests/api/test_jira_sync.py` — 5 passed (42.4с). `tests/api/test_jira_integration.py` —
+12 passed (184.7с, включая ранее упавший `negative_time_spent`).
