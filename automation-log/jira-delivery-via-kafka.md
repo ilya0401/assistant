@@ -528,3 +528,64 @@ task_key = "KAN-1%00" -> HTTP 400
 Добавлен комментарий на KAN-5 с подтверждением фикса и теста. Статус тикета не двигаю —
 `tools/jira_bug_report` поддерживает только `file`/`comment`, переход статуса — решение
 пользователя в самой Jira.
+
+## 2026-10-28 — флейк в Jenkins (DNS Docker Desktop, не баг приложения)
+
+### Контекст
+
+После пуша KAN-5 прогоны в Jenkins (build #150, #151, #152) и локальные перезапуски стали
+нестабильно падать на разных кейсах `TestJiraWorklogDelivery::test_entry_worklog_appears_in_jira`
+(то `task_1`, то `task_1_second`, то `task_1_day_unit`/`task_1_yesterday` — каждый раз другой) и
+один раз на `test_jira_connection_is_configured_and_reachable`. Все падения — `assert None is not
+None` (воркалог не появился за 30с) либо напрямую `requests.exceptions.ConnectionError`.
+
+### Находка
+
+В логах `vinnie-assistant-jira-consumer-1` за те же окна — повторяющийся
+`NameResolutionError` при обращении к `iyk040190-1790711247004.atlassian.net`:
+
+```
+[ERROR] Entry #NNNN: find_issue error, will retry: HTTPSConnectionPool(host='iyk040190-...atlassian.net', port=443):
+Max retries exceeded ... NameResolutionError("...Failed to resolve ... Temporary failure in name resolution")
+```
+
+Прямая проверка резолвинга изнутри контейнеров (`vinnie`, `jira-consumer`) дала ~20-27% провалов
+на повторных попытках (`socket.gethostbyname`), при этом резолвинг с хоста (macOS, резолверы
+`1.1.1.1`/`8.8.8.8`) — 10/10 успешных, без единого сбоя. Рестарт Docker Desktop (не только
+контейнеров) проблему не убрал — сбои продолжились в тех же логах после рестарта.
+
+**Решающая проверка**: откатили `backend/app` в `vinnie-assistant` на коммит d5f2216 (до фикса
+KAN-5) и `tests/`/`utils`/`pytest.ini` в `vinnie-tests` на коммит 381b5ef (до регрешн-теста
+KAN-5), перезапустили `vinnie`/`jira-consumer` с этим кодом и прогнали тот же набор тестов.
+**Результат идентичен**: 3 из 16 тестов упали по той же причине, и в логах консьюмера — те же
+`NameResolutionError` в то же окно времени. Это исключает любую связь с кодом/коммитами KAN-4/
+KAN-5 — ни один из них не трогает сеть/DNS. Причина — встроенный DNS-proxy Docker Desktop
+(VM-слой `linuxkit`/`vpnkit`), нестабильный на этой машине независимо от кода проекта.
+
+Оба репозитория возвращены на `main`, контейнеры перезапущены с актуальным кодом.
+
+### Решение
+
+Фиксить саму VM Docker Desktop из кода проекта невозможно — сделали тесты устойчивыми к
+кратковременным сетевым сбоям вместо того, чтобы полагаться на стабильность DNS:
+
+- `tests/api/test_jira_integration.py::test_entry_worklog_appears_in_jira` — `wait_until` для
+  появления воркалога: `timeout=30` → `60`; следующий `wait_for_zero_lag` в том же тесте:
+  `timeout=10` → `20`.
+- `tests/api/test_jira_integration.py::test_invalid_entry_does_not_appear_in_jira` —
+  `wait_for_zero_lag`: `timeout=30` → `60`.
+- `tests/api/test_jira_sync.py::test_nonexistent_task_returns_not_found` и
+  `test_malformed_task_key_does_not_retry_forever` — `wait_for_zero_lag`: `timeout=30` → `60`.
+- `tests/api/test_jira_sync.py::test_jira_connection_is_configured_and_reachable` — этот вызов
+  синхронный (без Kafka, без своего ретрая), один сетевой сбой валил тест сразу. Обёрнут в
+  `wait_until(..., timeout=15, interval=5)` — до 3 повторных попыток вызова
+  `check_jira_connection`, ждём именно `status == 200`, не просто ответ.
+
+Это не устраняет причину (нестабильность Docker Desktop), а не даёт короткому DNS-сбою красить
+весь прогон Jenkins тестом, который не нашёл реального дефекта.
+
+### Прогон
+
+`tests/api/test_jira_sync.py` — 5 passed. `tests/api/test_jira_integration.py` — 12 passed.
+Полный набор (`-m "not db and not chaos"`) — **28 passed** (без изменений в числе тестов,
+только в таймаутах).
