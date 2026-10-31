@@ -83,6 +83,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
+    restart: unless-stopped
 
   kafka-ui:
     image: ghcr.io/kafbat/kafka-ui:latest
@@ -94,6 +95,7 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    restart: unless-stopped
     networks:
       - vinnie-network
 
